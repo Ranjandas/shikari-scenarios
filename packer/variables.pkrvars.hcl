@@ -1,2 +1,2 @@
-consul_version = "enterprise-1.18.2"
-nomad_version = "enterprise-1.7.7"
+consul_version = "1.18"
+nomad_version = "1.7"
