@@ -86,6 +86,8 @@ build {
       "sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/fedora/hashicorp.repo",
       "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* containernetworking-plugins",
 
+      "sudo mkdir /opt/cni && sudo ln -s /usr/libexec/cni /opt/cni/bin",
+
       "sudo systemctl disable docker consul nomad"
     ]
   }
