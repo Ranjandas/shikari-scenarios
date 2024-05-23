@@ -26,7 +26,15 @@ The following steps will build a VM image with Consul and Nomad installed, which
 
 2. Now you can run the scenarios by going into specific scenario directory and invoking the template using Shikari.
 
+    First update the `image.location` inside the template file to point to the newly created image file in the previous step. (this should end with `.qcow2`)
+
     ```
     $ cd scenarios/nomad-consul-quickstart
-    $ shikari create -n demo -s 3 -c 3 -t shikari.yaml
+    $ shikari create --name demo --servers 3 --clients 3 --template shikari.yaml
     ```
+
+    The above example command will create 3 servers and 3 clients using the local `shikari.yaml` lima template.
+
+3. You can interact with the Consul and Nomad cluster from the host (if you have the binaries locally) as Lima will automatically port-forward Consul and Nomad ports to the host.
+
+4. You can exec into the servers using the `limactl shell <vm-name>` command.
