@@ -10,7 +10,7 @@ The following tools are required to run these scenarios:
 * [Lima](https://lima-vm.io/)
 * [Shikari](https://github.com/ranjandas/shikari)
 
-> NOTE: all the above expect shikari can be installed using Homebrew
+> NOTE: all the above except shikari can be installed using Homebrew
 
 ## Usage
 
