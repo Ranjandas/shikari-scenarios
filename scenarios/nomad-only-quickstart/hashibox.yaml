@@ -1,0 +1,83 @@
+images:
+  # Try to use a local image first.
+  - location: ~/artifacts/qemu/c-1.18-n-1.7.7/c-1.18-n-1.7.7.qcow2
+
+mounts: []
+containerd:
+  system: false
+  user: false
+provision:
+  - mode: system # configure Nomad
+    script: |
+      #!/bin/bash    
+      function setConfig {
+          local mode=$1
+          local cluster=$2
+
+          # Set the config files accordingly 
+          if [[ $mode == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+          data_dir  = "/opt/nomad/data"
+          bind_addr = "0.0.0.0"
+
+          server {
+          #license_path = "/etc/nomad.d/license.hclic"
+          enabled = true
+          bootstrap_expect = 1
+
+          server_join {
+              retry_join = ["lima-$cluster-srv-01.internal"]
+          }
+          }
+          datacenter = "$cluster"
+
+          client {
+          enabled = true
+          servers = ["lima-$cluster-srv-01.internal"]
+          }
+      EOF
+
+          elif [[ $mode == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+          data_dir  = "/opt/nomad/data"
+          bind_addr = "0.0.0.0"
+          datacenter = "$cluster"
+
+          client {
+          enabled = true
+          servers = ["lima-$cluster-srv-01.internal"]
+          }
+      EOF
+          else
+              echo "Invalid mode for setConfig"
+          fi
+      }
+
+
+          # Check if the environment variable 'MODE' is set
+          if [[ -n $MODE ]]; then
+              echo "MODE is set to: $MODE"
+          else
+              echo "MODE is not set."
+          fi
+
+          # Check if the environment variable 'CLUSTER' is set
+          if [[ -n $CLUSTER ]]; then
+              echo "CLUSTER is set to: $CLUSTER"
+          else
+              echo "CLUSTER is not set."
+          fi
+
+          setConfig $MODE $CLUSTER
+  - mode:
+    script: |
+      systemctl enable --now docker
+      systemctl enable --now nomad 
+  - mode: user
+    script: |
+      #!/bin/sh
+      nomad -autocomplete-install
+networks:
+  - lima: user-v2
+vmType: qemu
+
