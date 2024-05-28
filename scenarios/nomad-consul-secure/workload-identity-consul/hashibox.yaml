@@ -40,7 +40,7 @@ provision:
         }
 
         server = true
-        bootstrap_expect = 1
+        bootstrap_expect = $BOOTSTRAP_EXPECT
         
         # workload identity configs
         recursors   = ["1.1.1.1", "1.1.0.0"]
@@ -85,7 +85,6 @@ provision:
           default_policy = "deny"
           enable_token_persistence = true
           tokens = {
-            initial_management = "root"
             agent = "root"
           }
         }
@@ -126,18 +125,13 @@ provision:
 
           server {
           enabled = true
-          bootstrap_expect = 1
+          bootstrap_expect = $BOOTSTRAP_EXPECT
 
           server_join {
               retry_join = ["lima-$cluster-srv-01.internal"]
           }
           }
           datacenter = "$cluster"
-
-          # client {
-          # enabled = true
-          # servers = ["lima-$cluster-srv-01.internal"]
-          # }
 
           # workload identity configs
           # ACLS
@@ -147,7 +141,7 @@ provision:
 
           # consul config
           consul {
-            address               = "127.0.0.1:8500"
+            address = "127.0.0.1:8500"
             token = "root"
 
             service_identity {
@@ -239,15 +233,7 @@ provision:
               fi
           fi
           set -e
-          # Save the Bootstrap Token to the folder
-          echo "$OUTPUT" | grep -i secret | awk -F '=' '{print $2}' | xargs | awk 'NF' > $NOMAD_BOOTSTRAP_TOKEN
-          if [ -s $NOMAD_BOOTSTRAP_TOKEN ]; then
-              echo "nomad bootstrapped"
-              break
-          fi
       done
-      else
-              echo "No cluster leader - unable to execute boostrap token"
       fi
 
   - mode: system # setup workload identity
