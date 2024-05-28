@@ -219,13 +219,14 @@ provision:
   - mode: system # acl bootstrap nomad
     script: |
      #!/bin/sh
+     if [[ $MODE == "server" ]]; then
      NOMAD_BOOTSTRAP_TOKEN="/tmp/nomad_bootstrap"
      # Wait for nomad servers to come up and bootstrap nomad ACL
       for i in {1..10}; do
           # add sleep 5 secs
           set +e
           sleep 5
-          OUTPUT=$(nomad acl bootstrap 2>&1)
+          OUTPUT=$(echo "00000000-0000-0000-0000-000000000000"|nomad acl bootstrap - 2>&1)
           # checks if the previous command (nomad acl bootstrap) failed (non-zero exit status).
           if [ $? -ne 0 ]; then
               echo "nomad acl bootstrap: $OUTPUT"
@@ -245,6 +246,9 @@ provision:
               break
           fi
       done
+      else
+              echo "No cluster leader - unable to execute boostrap token"
+      fi
 
   - mode: system # setup workload identity
     script: |
