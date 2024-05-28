@@ -1,0 +1,191 @@
+images:
+  # Try to use a local image first.
+  - location: /Users/amit.chahal/Workdir/MyWorkHook/learn-consul-connect/packer/.artifacts/qemu/c-1.18-n-1.7/c-1.18-n-1.7.qcow2
+
+mounts: []
+containerd:
+  system: false
+  user: false
+provision:
+  - mode: system # configure Consul
+    script: |
+      #!/bin/bash
+
+      function setConfig {
+          local mode=$1
+          local cluster=$2
+
+          # Set the config files accordingly 
+          if [[ $mode == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "INFO"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-$cluster-srv-01.internal"]
+        datacenter = "$cluster"
+
+        ui_config {
+          enabled = true
+        }
+
+        connect {
+          enabled = true
+        }
+
+        acl {              ## ACL Block for Consul Server 
+          enabled = true
+          down_policy = "extend-cache"
+          default_policy = "deny"
+          enable_token_persistence = true
+          tokens = {
+            initial_management = "root"
+            agent = "root"
+          }
+        }
+        server = true
+        bootstrap_expect = 1
+      EOF
+
+          elif [[ $mode == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "INFO"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-$cluster-srv-01.internal"]
+        datacenter = "$cluster"
+
+        connect {
+          enabled = true
+        }
+       
+        acl {                 ## ACL Block for Consul Client
+          enabled = true
+          down_policy = "extend-cache"
+          default_policy = "deny"
+          enable_token_persistence = true
+          tokens = {
+            agent = "root"
+          }
+        }
+
+        server = false
+      EOF
+          else
+            echo "Invalid mode for setConfig"
+          fi
+        }
+
+          # Check if the environment variable 'MODE' is set
+          if [[ -n $MODE ]]; then
+              echo "MODE is set to: $MODE"
+          else
+              echo "MODE is not set."
+          fi
+
+          # Check if the environment variable 'CLUSTER' is set
+          if [[ -n $CLUSTER ]]; then
+              echo "CLUSTER is set to: $CLUSTER"
+          else
+              echo "CLUSTER is not set."
+          fi
+
+          setConfig $MODE $CLUSTER
+
+
+  - mode: system # configure Nomad
+    script: |
+      #!/bin/bash    
+      function setConfig {
+          local mode=$1
+          local cluster=$2
+
+          # Set the config files accordingly 
+          if [[ $mode == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+          data_dir  = "/opt/nomad/data"
+          bind_addr = "0.0.0.0"
+         
+          acl {                 ## ACL Block for Nomad Server
+            enabled = true
+          }
+          consul {
+            address = "127.0.0.1:8500"
+            token = "root"
+          }
+
+          server {
+          #license_path = "/etc/nomad.d/license.hclic"
+          enabled = true
+          bootstrap_expect = 1
+
+          server_join {
+              retry_join = ["lima-$cluster-srv-01.internal"]
+          }
+          }
+          datacenter = "$cluster"
+
+          client {
+          enabled = true
+          servers = ["lima-$cluster-srv-01.internal"]
+          }
+      EOF
+
+          elif [[ $mode == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+          data_dir  = "/opt/nomad/data"
+          bind_addr = "0.0.0.0"
+          datacenter = "$cluster"
+
+          client {
+          enabled = true
+          servers = ["lima-$cluster-srv-01.internal"]
+          }
+      EOF
+          else
+              echo "Invalid mode for setConfig"
+          fi
+      }
+
+
+          # Check if the environment variable 'MODE' is set
+          if [[ -n $MODE ]]; then
+              echo "MODE is set to: $MODE"
+          else
+              echo "MODE is not set."
+          fi
+
+          # Check if the environment variable 'CLUSTER' is set
+          if [[ -n $CLUSTER ]]; then
+              echo "CLUSTER is set to: $CLUSTER"
+          else
+              echo "CLUSTER is not set."
+          fi
+
+          setConfig $MODE $CLUSTER
+
+## NOMAD ACL BOOTSTRAP WITH CHOICE TOKEN 
+  - mode: user
+    script: |        
+      #!/bin/bash
+      echo -e "Nomad Starting.."
+      sleep 10
+      echo "00000000-0000-0000-0000-000000000000"|nomad acl bootstrap -  
+
+  - mode:
+    script: |
+      systemctl enable --now docker
+      systemctl enable --now nomad consul
+  - mode: user
+    script: |
+      #!/bin/sh
+      nomad -autocomplete-install
+      consul -autocomplete-install
+networks:
+  - lima: user-v2
+vmType: qemu
+
+env:
+  CONSUL_HTTP_TOKEN: root
+  NOMAD_TOKEN: 00000000-0000-0000-0000-000000000000
