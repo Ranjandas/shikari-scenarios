@@ -1,5 +1,5 @@
-# shikari-scenarios
-A collection of Lima Templates that will be used with Shikari.
+# shikari-scenario for consul with nomad workload identities
+A Lima Templates that will create consul and nomad cluster with workload identity enabled.
 
 ## Prerequisites
 
