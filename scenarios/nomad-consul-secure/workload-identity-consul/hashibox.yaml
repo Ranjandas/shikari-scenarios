@@ -42,7 +42,7 @@ provision:
         server = true
         bootstrap_expect = $BOOTSTRAP_EXPECT
         
-        # workload identity configs
+        # required for transparent proxy
         recursors   = ["1.1.1.1", "1.1.0.0"]
         addresses {
           dns = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
@@ -72,9 +72,14 @@ provision:
         connect {
           enabled = true
         }
+
+        ports {
+          grpc = 8502
+        }
+        
         server = false
 
-        # workload identity configs
+        # required for transparent proxy
         recursors   = ["1.1.1.1", "1.1.0.0"]
         addresses {
           dns = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
