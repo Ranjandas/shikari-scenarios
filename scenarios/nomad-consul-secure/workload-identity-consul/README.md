@@ -20,8 +20,7 @@ Perform the following steps to execute Workload-Identity jobs for consul
 
 1. Execute the below command for shikari to spin up nomad and consul cluster
 
-    ```_
-    $ shikari create -n wi -s n -c n -t <template_file_location> -e CONSUL_LICENSE=<license_file_location> -e NOMAD_LICENSE=<license_file_location> -e BOOTSTRAP_EXPECT=number
+    ```
     Example:
     $ shikari create -n wi -s 1 -c 1 -t ../shikari-scenarios/scenarios/nomad-consul-secure/workload-identity-consul/hashibox.yaml -e CONSUL_LICENSE=$(cat ~/workspace/consul.hclic) -e NOMAD_LICENSE=$(cat ~/workspace/nomad.hclic) -e BOOTSTRAP_EXPECT=1 
     ```
