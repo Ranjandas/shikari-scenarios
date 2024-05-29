@@ -9,7 +9,7 @@ The following tools are required to run these scenarios:
 * CDRtools (if you are building custom images)
 * [Lima](https://lima-vm.io/)
 * [Shikari](https://github.com/ranjandas/shikari)
-* [Worload_Identity_Doc] (https://developer.hashicorp.com/nomad/docs/concepts/workload-identity)
+* [Workload_Identity_Doc](https://developer.hashicorp.com/nomad/docs/concepts/workload-identity)
 * [Workload_Identity_Tutorial](https://developer.hashicorp.com/nomad/tutorials/integrate-consul/consul-acl)
 
 > NOTE: all the above except shikari can be installed using Homebrew
