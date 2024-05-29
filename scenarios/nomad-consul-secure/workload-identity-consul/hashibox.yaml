@@ -76,7 +76,7 @@ provision:
         ports {
           grpc = 8502
         }
-        
+
         server = false
 
         # required for transparent proxy
@@ -246,6 +246,7 @@ provision:
      # Set env vars for tool CLIs
       export CONSUL_HTTP_TOKEN="root"
       nomad setup consul -y
+
 networks:
   - lima: user-v2
 vmType: qemu
