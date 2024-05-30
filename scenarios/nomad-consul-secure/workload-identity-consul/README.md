@@ -11,6 +11,7 @@ The following tools are required to run these scenarios:
 * [Shikari](https://github.com/ranjandas/shikari)
 * [Workload_Identity_Doc](https://developer.hashicorp.com/nomad/docs/concepts/workload-identity)
 * [Workload_Identity_Tutorial](https://developer.hashicorp.com/nomad/tutorials/integrate-consul/consul-acl)
+* Supported from [Nomad Version](https://github.com/hashicorp/nomad/blob/main/CHANGELOG.md#170-december-07-2023)
 
 > NOTE: all the above except shikari can be installed using Homebrew
 
