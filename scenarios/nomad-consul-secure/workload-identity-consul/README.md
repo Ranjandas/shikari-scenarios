@@ -54,8 +54,8 @@ Perform the following steps to execute Workload-Identity jobs for consul
 6. To destroy the setup execute the below commands
 
     ```
-    $ shikari stop -n ran
-    $ shikari destroy -n ran f
+    $ shikari stop -n wi
+    $ shikari destroy -n wi f
     unset CONSUL_HTTP_TOKEN
     unset NOMAD_TOKEN
     ```
