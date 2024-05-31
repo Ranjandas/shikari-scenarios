@@ -94,6 +94,12 @@ build {
       "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* containernetworking-plugins",
 
       "sudo mkdir /opt/cni && sudo ln -s /usr/libexec/cni /opt/cni/bin",
+
+      # Provision Nomad and Consul CA's that can be later used for agent cert provisioning.
+      "sudo mkdir /etc/consul.d/certs && cd /etc/consul.d/certs ; sudo consul tls ca create",
+      "sudo mkdir /etc/nomad.d/certs && cd /etc/nomad.d/certs ; sudo consul tls ca create",
+
+      # Enabling of the services is the responsibility of the instance provisioning scripts.
       "sudo systemctl disable docker consul nomad"
     ]
   }
