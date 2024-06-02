@@ -87,6 +87,11 @@ build {
     inline = [
       "sudo dnf clean all",
       "sudo dnf install -y unzip wget",
+
+      # For multicast DNS to use with socket_vmnet in Lima
+      "sudo dnf install -y crudini",
+      "sudo mkdir /etc/systemd/resolved.conf.d/ && sudo crudini --ini-options=nospace --set /etc/systemd/resolved.conf.d/mdns.conf Resolve MulticastDNS yes",
+
       "sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo",
       "sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
 
