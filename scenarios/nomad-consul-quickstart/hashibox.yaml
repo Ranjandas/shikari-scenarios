@@ -87,7 +87,7 @@ provision:
           if [[ $mode == "server" ]]; then
       cat <<-EOF > /etc/nomad.d/nomad.hcl
           data_dir  = "/opt/nomad/data"
-          bind_addr = "0.0.0.0"
+          bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
 
           server {
           #license_path = "/etc/nomad.d/license.hclic"
@@ -109,7 +109,7 @@ provision:
           elif [[ $mode == "client" ]]; then
       cat <<-EOF > /etc/nomad.d/nomad.hcl
           data_dir  = "/opt/nomad/data"
-          bind_addr = "0.0.0.0"
+          bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
           datacenter = "$cluster"
 
           client {
