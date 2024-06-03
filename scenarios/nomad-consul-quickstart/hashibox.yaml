@@ -20,9 +20,9 @@ provision:
       cat <<-EOF > /etc/consul.d/consul.hcl
         data_dir  = "/opt/consul/data"
         log_level  = "INFO"
-        bind_addr = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
         client_addr = "0.0.0.0"
-        retry_join = ["lima-$cluster-srv-01.internal"]
+        retry_join = ["lima-$cluster-srv-01.local"]
         datacenter = "$cluster"
 
         ui_config {
@@ -34,16 +34,16 @@ provision:
         }
 
         server = true
-        bootstrap_expect = 1
+        bootstrap_expect = $BOOTSTRAP_EXPECT
       EOF
 
           elif [[ $mode == "client" ]]; then
       cat <<-EOF > /etc/consul.d/consul.hcl
         data_dir  = "/opt/consul/data"
         log_level  = "INFO"
-        bind_addr = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
         client_addr = "0.0.0.0"
-        retry_join = ["lima-$cluster-srv-01.internal"]
+        retry_join = ["lima-$cluster-srv-01.local"]
         datacenter = "$cluster"
 
         connect {
@@ -70,6 +70,10 @@ provision:
               echo "CLUSTER is not set."
           fi
 
+          if [[ -n $CONSUL_LICENSE ]]; then
+            echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+          fi
+
           setConfig $MODE $CLUSTER
 
   - mode: system # configure Nomad
@@ -83,34 +87,34 @@ provision:
           if [[ $mode == "server" ]]; then
       cat <<-EOF > /etc/nomad.d/nomad.hcl
           data_dir  = "/opt/nomad/data"
-          bind_addr = "0.0.0.0"
+          bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
 
           server {
           #license_path = "/etc/nomad.d/license.hclic"
           enabled = true
-          bootstrap_expect = 1
+          bootstrap_expect = $BOOTSTRAP_EXPECT
 
           server_join {
-              retry_join = ["lima-$cluster-srv-01.internal"]
+              retry_join = ["lima-$cluster-srv-01.local"]
           }
           }
           datacenter = "$cluster"
 
           client {
           enabled = true
-          servers = ["lima-$cluster-srv-01.internal"]
+          servers = ["lima-$cluster-srv-01.local"]
           }
       EOF
 
           elif [[ $mode == "client" ]]; then
       cat <<-EOF > /etc/nomad.d/nomad.hcl
           data_dir  = "/opt/nomad/data"
-          bind_addr = "0.0.0.0"
+          bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
           datacenter = "$cluster"
 
           client {
           enabled = true
-          servers = ["lima-$cluster-srv-01.internal"]
+          servers = ["lima-$cluster-srv-01.local"]
           }
       EOF
           else
@@ -133,6 +137,10 @@ provision:
               echo "CLUSTER is not set."
           fi
 
+          if [[ -n $NOMAD_LICENSE ]]; then
+            echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
+          fi
+
           setConfig $MODE $CLUSTER
   - mode:
     script: |
@@ -144,6 +152,6 @@ provision:
       nomad -autocomplete-install
       consul -autocomplete-install
 networks:
-  - lima: user-v2
+  - lima: shared
 vmType: qemu
 
