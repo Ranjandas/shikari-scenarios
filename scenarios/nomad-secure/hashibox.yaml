@@ -1,6 +1,6 @@
 images:
   # Try to use a local image first.
-  - location: /Users/amit.chahal/Workdir/MyWorkHook/learn-consul-connect/packer/.artifacts/qemu/c-1.18-n-1.7/c-1.18-n-1.7.qcow2
+  - location: /Users/amit.chahal/Workdir/MyWorkHook/learn-consul-connect/packer/.artifacts/qemu/c-1.17-n-1.6/c-1.17-n-1.6.qcow2
 
 mounts: []
 containerd:
@@ -90,10 +90,14 @@ provision:
           else
               echo "CLUSTER is not set."
           fi
-
           setConfig $MODE $CLUSTER
 
-
+  - mode: system # Generate server & Clients TLS certs
+    script: |
+      sleep 5
+      cd $NOMAD_CERTS_HOME && sudo nomad tls cert create -server
+      sleep 5
+      cd $NOMAD_CERTS_HOME && sudo nomad tls cert create -client
   - mode: system # configure Nomad
     script: |
       #!/bin/bash    
@@ -114,6 +118,15 @@ provision:
             address = "127.0.0.1:8500"
             token = "root"
           }
+       
+          #TLS CONFIG
+          tls {  
+            http = false
+            rpc  = false
+            ca_file   = "$NOMAD_CERTS_HOME/nomad-agent-ca.pem"
+            cert_file = "$NOMAD_CERTS_HOME/global-$MODE-nomad.pem"
+            key_file  = "$NOMAD_CERTS_HOME/global-$MODE-nomad-key.pem"
+           }
 
           server {
           #license_path = "/etc/nomad.d/license.hclic"
@@ -138,9 +151,17 @@ provision:
           bind_addr = "0.0.0.0"
           datacenter = "$cluster"
 
+          #TLS CONFIG
+          tls {
+            http = false
+            rpc  = false
+            ca_file   = "$NOMAD_CERTS_HOME/nomad-agent-ca.pem"
+            cert_file = "$NOMAD_CERTS_HOME/global-$MODE-nomad.pem"
+            key_file  = "$NOMAD_CERTS_HOME/global-$MODE-nomad-key.pem"
+          } 
           client {
-          enabled = true
-          servers = ["lima-$cluster-srv-01.internal"]
+            enabled = true
+            servers = ["lima-$cluster-srv-01.internal"]
           }
       EOF
           else
@@ -189,3 +210,4 @@ vmType: qemu
 env:
   CONSUL_HTTP_TOKEN: root
   NOMAD_TOKEN: 00000000-0000-0000-0000-000000000000
+  NOMAD_CERTS_HOME: /etc/nomad.d/certs
