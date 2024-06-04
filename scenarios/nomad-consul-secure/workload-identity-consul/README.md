@@ -1,6 +1,3 @@
-# shikari-scenario for consul with nomad workload identities
-A Lima Templates that will create consul and nomad cluster with workload identity enabled.
-
 ## Prerequisites
 
 The following tools are required to run these scenarios:
@@ -23,7 +20,7 @@ Perform the following steps to execute Workload-Identity jobs for consul
 
     ```
     Example:
-    $ shikari create -n wi -s 1 -c 1 -t ../shikari-scenarios/scenarios/nomad-consul-secure/workload-identity-consul/hashibox.yaml -e CONSUL_LICENSE=$(cat ~/workspace/consul.hclic) -e NOMAD_LICENSE=$(cat ~/workspace/nomad.hclic) -e BOOTSTRAP_EXPECT=1 
+    $ shikari create -n wi -s 1 -c 1 -t ../shikari-scenarios/scenarios/nomad-consul-secure/workload-identity-consul/hashibox.yaml -e CONSUL_LICENSE=$(cat ~/workspace/consul.hclic) -e NOMAD_LICENSE=$(cat ~/workspace/nomad.hclic)
     ```
 
 2. Export the nomad and consul token as env var

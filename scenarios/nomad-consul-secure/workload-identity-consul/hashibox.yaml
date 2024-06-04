@@ -1,6 +1,6 @@
 images:
   # Try to use a local image first.
-  - location: /Users/vijeshvijayan/workspace/github/shikari-scenarios/packer/.artifacts/c-enterprise-1.18-n-enterprise-1.7/c-enterprise-1.18-n-enterprise-1.7.qcow2
+  - location: `../../packer/.artifacts/c-enterprise-1.18-n-enterprise-1.7/c-enterprise-1.18-n-enterprise-1.7.qcow2
 
 mounts: []
 containerd:
