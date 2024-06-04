@@ -106,7 +106,7 @@ build {
 
       # Set permissions for the certs directory
       "sudo chown consul:consul /etc/consul.d/certs",
-      "sudo chown nomad:nomad /etc/nomad.d/certs"
+      "sudo chown nomad:nomad /etc/nomad.d/certs",
 
       # Enabling of the services is the responsibility of the instance provisioning scripts.
       "sudo systemctl disable docker consul nomad"
