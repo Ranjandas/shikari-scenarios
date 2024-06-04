@@ -1,6 +1,6 @@
 images:
   # Try to use a local image first.
-  - location: /Users/amit.chahal/Workdir/MyWorkHook/learn-consul-connect/packer/.artifacts/qemu/c-1.17-n-1.6/c-1.17-n-1.6.qcow2
+  - location: /Users/amit.chahal/Workdir/MyWorkHook/shikari-scenarios/packer/.artifacts/c-1.18-n-1.7/c-1.18-n-1.7.qcow2
 
 mounts: []
 containerd:
@@ -188,11 +188,35 @@ provision:
 
 ## NOMAD ACL BOOTSTRAP WITH CHOICE TOKEN 
   - mode: user
-    script: |        
-      #!/bin/bash
-      echo -e "Nomad Starting.."
-      sleep 10
-      echo "00000000-0000-0000-0000-000000000000"|nomad acl bootstrap -  
+    script: |
+      #!/bin/sh
+      if [[ $MODE == "server" ]]; then
+      NOMAD_BOOTSTRAP_TOKEN="/tmp/nomad_bootstrap"
+      # Wait for nomad servers to come up and bootstrap nomad ACL
+      for i in {1..10}; do
+          # add sleep 5 secs
+          set +e
+          sleep 5
+          OUTPUT=$(echo "00000000-0000-0000-0000-000000000000"|nomad acl bootstrap - 2>&1)
+          # checks if the previous command (nomad acl bootstrap) failed (non-zero exit status).
+          if [ $? -ne 0 ]; then
+              echo "nomad acl bootstrap: $OUTPUT"
+              if [[ "$OUTPUT" = *"No cluster leader"* ]]; then
+                  echo "nomad has no cluster leader"
+                  continue
+              else
+                  echo "nomad already bootstrapped"
+                  exit 0
+              fi
+          fi
+          set -e
+      done
+      fi
+    #script: |        
+    #  #!/bin/bash
+    #  echo -e "Nomad Starting.."
+    #  sleep 10
+    #  echo "00000000-0000-0000-0000-000000000000"|nomad acl bootstrap -  
 
   - mode:
     script: |
@@ -211,3 +235,4 @@ env:
   CONSUL_HTTP_TOKEN: root
   NOMAD_TOKEN: 00000000-0000-0000-0000-000000000000
   NOMAD_CERTS_HOME: /etc/nomad.d/certs
+  HOME: /Users/amit.chahal/Workdir/MyWorkHook
