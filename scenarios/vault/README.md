@@ -1,6 +1,7 @@
 ## Prerequisites
 
 Procure Vault license from internal license portal and save to local machine.
+If Vault license file is not present or license content is invalid, Vault will not start.
 
 ## Usage
 
