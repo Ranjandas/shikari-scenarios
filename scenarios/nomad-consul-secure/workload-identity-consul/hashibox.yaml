@@ -1,0 +1,253 @@
+images:
+  # Try to use a local image first.
+  - location: `../../packer/.artifacts/c-enterprise-1.18-n-enterprise-1.7/c-enterprise-1.18-n-enterprise-1.7.qcow2
+
+mounts: []
+containerd:
+  system: false
+  user: false
+provision:
+  - mode: system # set license
+    script: |
+      #!/bin/bash
+      echo CONSUL_LICENSE=$CONSUL_LICENSE > /etc/consul.d/consul.env
+      echo NOMAD_LICENSE=$NOMAD_LICENSE > /etc/nomad.d/nomad.env
+
+  - mode: system # configure Consul
+    script: |
+      #!/bin/bash
+  
+      function setConfig {
+          local mode=$1
+          local cluster=$2
+
+          # Set the config files accordingly 
+          if [[ $mode == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "INFO"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-$cluster-srv-01.internal"]
+        datacenter = "$cluster"
+
+        ui_config {
+          enabled = true
+        }
+
+        connect {
+          enabled = true
+        }
+
+        server = true
+        bootstrap_expect = $BOOTSTRAP_EXPECT
+        
+        # required for transparent proxy
+        recursors   = ["1.1.1.1", "1.1.0.0"]
+        addresses {
+          dns = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        }
+        acl {
+          enabled = true
+          down_policy = "extend-cache"
+          default_policy = "deny"
+          enable_token_persistence = true
+          tokens = {
+            initial_management = "root"
+            agent = "root"
+          }
+        }
+
+      EOF
+
+          elif [[ $mode == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "INFO"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-$cluster-srv-01.internal"]
+        datacenter = "$cluster"
+
+        connect {
+          enabled = true
+        }
+
+        ports {
+          grpc = 8502
+        }
+
+        server = false
+
+        # required for transparent proxy
+        recursors   = ["1.1.1.1", "1.1.0.0"]
+        addresses {
+          dns = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        }
+        acl {
+          enabled = true
+          down_policy = "extend-cache"
+          default_policy = "deny"
+          enable_token_persistence = true
+          tokens = {
+            agent = "root"
+          }
+        }
+      EOF
+          else
+            echo "Invalid mode for setConfig"
+          fi
+        }
+
+          # Check if the environment variable 'MODE' is set
+          if [[ -n $MODE ]]; then
+              echo "MODE is set to: $MODE"
+          else
+              echo "MODE is not set."
+          fi
+
+          # Check if the environment variable 'CLUSTER' is set
+          if [[ -n $CLUSTER ]]; then
+              echo "CLUSTER is set to: $CLUSTER"
+          else
+              echo "CLUSTER is not set."
+          fi
+
+          setConfig $MODE $CLUSTER
+
+  - mode: system # configure Nomad
+    script: |
+      #!/bin/bash    
+      function setConfig {
+          local mode=$1
+          local cluster=$2
+
+          # Set the config files accordingly 
+          if [[ $mode == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+          data_dir  = "/opt/nomad/data"
+          bind_addr = "0.0.0.0"
+
+          server {
+          enabled = true
+          bootstrap_expect = $BOOTSTRAP_EXPECT
+
+          server_join {
+              retry_join = ["lima-$cluster-srv-01.internal"]
+          }
+          }
+          datacenter = "$cluster"
+
+          # workload identity configs
+          # ACLS
+          acl {
+            enabled = true
+          }
+
+          # consul config
+          consul {
+            address = "127.0.0.1:8500"
+            token = "root"
+
+            service_identity {
+              aud = ["consul.io"]
+              ttl = "1h"
+            }
+
+            task_identity {
+              aud = ["consul.io"]
+              ttl = "1h"
+            }
+          }
+      EOF
+
+          elif [[ $mode == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+          data_dir  = "/opt/nomad/data"
+          bind_addr = "0.0.0.0"
+          datacenter = "$cluster"
+
+          client {
+          enabled = true
+          servers = ["lima-$cluster-srv-01.internal"]
+          }
+          
+          # workload identity configs
+          # ACLS
+          acl {
+            enabled = true
+          }
+
+          # consul config
+          consul {
+            address               = "127.0.0.1:8500"
+            token                 = "root"
+          }
+      EOF
+          else
+              echo "Invalid mode for setConfig"
+          fi
+      }
+
+
+          # Check if the environment variable 'MODE' is set
+          if [[ -n $MODE ]]; then
+              echo "MODE is set to: $MODE"
+          else
+              echo "MODE is not set."
+          fi
+
+          # Check if the environment variable 'CLUSTER' is set
+          if [[ -n $CLUSTER ]]; then
+              echo "CLUSTER is set to: $CLUSTER"
+          else
+              echo "CLUSTER is not set."
+          fi
+
+          setConfig $MODE $CLUSTER
+  - mode:
+    script: |
+      systemctl enable --now docker
+      systemctl enable --now nomad consul
+  - mode: user
+    script: |
+      #!/bin/sh
+      nomad -autocomplete-install
+      consul -autocomplete-install
+
+  - mode: system # acl bootstrap nomad
+    script: |
+     #!/bin/sh
+     if [[ $MODE == "server" ]]; then
+     # Wait for nomad servers to come up and bootstrap nomad ACL
+      for i in {1..10}; do
+          # add sleep 5 secs
+          set +e
+          sleep 5
+          OUTPUT=$(echo "00000000-0000-0000-0000-000000000000"|nomad acl bootstrap - 2>&1)
+          # checks if the previous command (nomad acl bootstrap) failed (non-zero exit status).
+          if [ $? -ne 0 ]; then
+              echo "nomad acl bootstrap: $OUTPUT"
+              if [[ "$OUTPUT" = *"No cluster leader"* ]]; then
+                  echo "nomad has no cluster leader"
+                  continue
+              else
+                  echo "nomad already bootstrapped"
+                  exit 0
+              fi
+          fi
+          set -e
+      done
+      fi
+
+  - mode: system # setup workload identity
+    script: |
+     #!/bin/sh
+     # Set env vars for tool CLIs
+      export CONSUL_HTTP_TOKEN="root"
+      nomad setup consul -y
+
+networks:
+  - lima: user-v2
+vmType: qemu
+
