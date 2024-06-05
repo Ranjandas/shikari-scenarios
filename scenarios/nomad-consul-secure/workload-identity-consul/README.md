@@ -53,7 +53,7 @@ Perform the following steps to execute Workload-Identity jobs for consul
 
     ```
     $ shikari stop -n wi
-    $ shikari destroy -n wi f
+    $ shikari destroy -n wi -f
     unset CONSUL_HTTP_TOKEN
     unset NOMAD_TOKEN
     ```
