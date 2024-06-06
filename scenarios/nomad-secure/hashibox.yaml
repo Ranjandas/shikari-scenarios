@@ -7,6 +7,15 @@ containerd:
   system: false
   user: false
 provision:
+  - mode: system # Generate server & Clients TLS certs
+    script: |
+      sleep 5
+      cd $CONSUL_CERTS_HOME && sudo consul tls cert create -server
+      sleep 5
+      cd $CONSUL_CERTS_HOME && sudo consul tls cert create -client
+      
+      sudo chmod 644 /etc/consul.d/certs/*
+
   - mode: system # configure Consul
     script: |
       #!/bin/bash
@@ -24,6 +33,22 @@ provision:
         client_addr = "0.0.0.0"
         retry_join = ["lima-$cluster-srv-01.internal"]
         datacenter = "$cluster"
+         
+        verify_incoming = true
+        verify_outgoing = true
+        verify_server_hostname = true
+        ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+        cert_file = "$CONSUL_CERTS_HOME/dc1-server-consul-0.pem"
+        key_file = "$CONSUL_CERTS_HOME/dc1-server-consul-0-key.pem"
+        auto_encrypt {
+          allow_tls = true
+        }
+       
+        ports {
+          https = 8501
+          grpc = 8502
+          grpc_tls = 8503
+        } 
 
         ui_config {
           enabled = true
@@ -59,7 +84,13 @@ provision:
         connect {
           enabled = true
         }
-       
+        
+        ports {
+          https = 8501
+          grpc = 8502
+          grpc_tls = 8503
+        }
+
         acl {                 ## ACL Block for Consul Client
           enabled = true
           down_policy = "extend-cache"
@@ -69,6 +100,15 @@ provision:
             agent = "root"
           }
         }
+  
+        verify_incoming = false
+        verify_outgoing = true
+        verify_server_hostname = true
+        ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+        auto_encrypt = {
+          tls = true
+        }
+
 
         server = false
       EOF
@@ -119,8 +159,12 @@ provision:
             enabled = true
           }
           consul {
-            address = "127.0.0.1:8500"
+            address = "127.0.0.1:8501"
             token = "root"
+            cert_file = "$CONSUL_CERTS_HOME/dc1-client-consul-0.pem"
+            key_file = "$CONSUL_CERTS_HOME/dc1-client-consul-0-key.pem"
+            ssl = true
+            grpc_ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
           }
        
           #TLS CONFIG
@@ -163,6 +207,16 @@ provision:
             cert_file = "$NOMAD_CERTS_HOME/global-$MODE-nomad.pem"
             key_file  = "$NOMAD_CERTS_HOME/global-$MODE-nomad-key.pem"
           } 
+
+          consul {
+            address = "127.0.0.1:8501"
+            token = "root"
+            cert_file = "$CONSUL_CERTS_HOME/dc1-client-consul-0.pem"
+            key_file = "$CONSUL_CERTS_HOME/dc1-client-consul-0-key.pem"
+            ssl = true
+            grpc_ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+          }
+
           client {
             enabled = true
             servers = ["lima-$cluster-srv-01.internal"]
@@ -200,7 +254,7 @@ provision:
           # add sleep 5 secs
           set +e
           sleep 5
-          OUTPUT=$(echo "00000000-0000-0000-0000-000000000000"|nomad acl bootstrap - 2>&1)
+          OUTPUT=$(echo "$NOMAD_TOKEN"|nomad acl bootstrap - 2>&1)
           #checks if the previous command (nomad acl bootstrap) failed (non-zero exit status).
           if [ $? -ne 0 ]; then
               echo "Nomad ACL Bootstrapping Error: $OUTPUT"
@@ -208,12 +262,10 @@ provision:
                   echo "Nomad has no Cluster Leader!!"
                   continue
               else
+                  echo "$NOMAD_TOKEN"|nomad acl bootstrap - 2>&1
                   echo "Nomad Bootstrapped!!"
                   exit 0
               fi
-            else
-              export NOMAD_TOKEN=`echo $OUTPUT|awk -F"=" '{print $3}'|awk -F" " '{print $1}'`
-              
           fi
           set -e
       done
@@ -241,3 +293,8 @@ env:
   NOMAD_CLIENT_KEY: /etc/nomad.d/certs/global-cli-nomad-key.pem
   BOOTSTRAP_EXPECT: 1
   NOMAD_ADDR: https://localhost:4646
+  CONSUL_CERTS_HOME: /etc/consul.d/certs
+  CONSUL_CACERT: /etc/consul.d/certs/consul-agent-ca.pem
+  CONSUL_CLIENT_CERT: /etc/consul.d/certs/dc1-client-consul-0.pem
+  CONSUL_CLIENT_KEY: /etc/consul.d/certs/dc1-client-consul-0-key.pem
+  CONSUL_HTTP_ADDR: https://localhost:8501
