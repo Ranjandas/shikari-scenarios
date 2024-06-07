@@ -2,33 +2,47 @@ images:
   # Try to use a local image first.
   - location: ~/artifacts/qemu/c-1.18-n-1.7/c-1.18-n-1.7.qcow2
 
-mounts: []
-containerd:
-  system: false
-  user: false
+
+# disable port-mapping, mounts, containerd etc
+plain: true
+
 provision:
-  - mode: system # configure Consul
+  - mode: system # install Consul and Nomad Licenses if any
     script: |
       #!/bin/bash
 
-      function setConfig {
-          local mode=$1
-          local cluster=$2
+      if [[ -n $CONSUL_LICENSE ]]; then
+        echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+      fi
 
-          # Set the config files accordingly 
-          if [[ $mode == "server" ]]; then
+      if [[ -n $NOMAD_LICENSE ]]; then
+        echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
+      fi
+
+  - mode:  system # Configure Consul common settings
+    script: |
+      #!/bin/bash
+
+      # common config for Server and Client
       cat <<-EOF > /etc/consul.d/consul.hcl
         data_dir  = "/opt/consul/data"
         log_level  = "INFO"
         bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
         client_addr = "0.0.0.0"
-        retry_join = ["lima-$cluster-srv-01.local"]
-        datacenter = "$cluster"
+        retry_join = ["lima-$CLUSTER-srv-01.local"]
+        datacenter = "$CLUSTER"
 
         ui_config {
           enabled = true
         }
+      EOF
 
+  - mode: system # Configure Consul server settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/server.hcl
         connect {
           enabled = true
         }
@@ -36,112 +50,59 @@ provision:
         server = true
         bootstrap_expect = $BOOTSTRAP_EXPECT
       EOF
+      fi
 
-          elif [[ $mode == "client" ]]; then
-      cat <<-EOF > /etc/consul.d/consul.hcl
-        data_dir  = "/opt/consul/data"
-        log_level  = "INFO"
-        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
-        client_addr = "0.0.0.0"
-        retry_join = ["lima-$cluster-srv-01.local"]
-        datacenter = "$cluster"
-
-        connect {
-          enabled = true
-        }
-        server = false
-      EOF
-          else
-            echo "Invalid mode for setConfig"
-          fi
-        }
-
-          # Check if the environment variable 'MODE' is set
-          if [[ -n $MODE ]]; then
-              echo "MODE is set to: $MODE"
-          else
-              echo "MODE is not set."
-          fi
-
-          # Check if the environment variable 'CLUSTER' is set
-          if [[ -n $CLUSTER ]]; then
-              echo "CLUSTER is set to: $CLUSTER"
-          else
-              echo "CLUSTER is not set."
-          fi
-
-          if [[ -n $CONSUL_LICENSE ]]; then
-            echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
-          fi
-
-          setConfig $MODE $CLUSTER
-
-  - mode: system # configure Nomad
+  - mode: system # Configure Consul client settings
     script: |
-      #!/bin/bash    
-      function setConfig {
-          local mode=$1
-          local cluster=$2
+      #!/bin/bash
 
-          # Set the config files accordingly 
-          if [[ $mode == "server" ]]; then
+      if [[ $MODE == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/client.hcl
+        ports {
+          grpc = 8502
+        }
+      EOF
+      fi
+
+  - mode: system # Configure Nomad common settings
+    script: |
+      #!/bin/bash
       cat <<-EOF > /etc/nomad.d/nomad.hcl
-          data_dir  = "/opt/nomad/data"
-          bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        data_dir  = "/opt/nomad/data"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        datacenter = "$CLUSTER"
+      EOF
 
-          server {
-          #license_path = "/etc/nomad.d/license.hclic"
-          enabled = true
-          bootstrap_expect = $BOOTSTRAP_EXPECT
+  - mode: system # configure Nomad server settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/server.hcl
+        server {
+        #license_path = "/etc/nomad.d/license.hclic"
+        enabled = true
+        bootstrap_expect = $BOOTSTRAP_EXPECT
 
           server_join {
-              retry_join = ["lima-$cluster-srv-01.local"]
+            retry_join = ["lima-$CLUSTER-srv-01.local"]
           }
-          }
-          datacenter = "$cluster"
-
-          client {
-          enabled = true
-          servers = ["lima-$cluster-srv-01.local"]
-          }
+        }
       EOF
+      fi
 
-          elif [[ $mode == "client" ]]; then
-      cat <<-EOF > /etc/nomad.d/nomad.hcl
-          data_dir  = "/opt/nomad/data"
-          bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
-          datacenter = "$cluster"
+  - mode: system # configure Nomad client settings
+    script: |
+      #!/bin/bash
 
-          client {
+      if [[ $MODE == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/client.hcl
+        client {
           enabled = true
-          servers = ["lima-$cluster-srv-01.local"]
-          }
+          servers = ["lima-$CLUSTER-srv-01.local"]
+        }
       EOF
-          else
-              echo "Invalid mode for setConfig"
-          fi
-      }
-
-
-          # Check if the environment variable 'MODE' is set
-          if [[ -n $MODE ]]; then
-              echo "MODE is set to: $MODE"
-          else
-              echo "MODE is not set."
-          fi
-
-          # Check if the environment variable 'CLUSTER' is set
-          if [[ -n $CLUSTER ]]; then
-              echo "CLUSTER is set to: $CLUSTER"
-          else
-              echo "CLUSTER is not set."
-          fi
-
-          if [[ -n $NOMAD_LICENSE ]]; then
-            echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
-          fi
-
-          setConfig $MODE $CLUSTER
+      fi
   - mode:
     script: |
       systemctl enable --now docker
@@ -154,4 +115,3 @@ provision:
 networks:
   - lima: shared
 vmType: qemu
-
