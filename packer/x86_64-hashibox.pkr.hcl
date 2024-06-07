@@ -79,7 +79,12 @@ build {
     ]
     inline = [
       "sudo dnf clean all",
-      "sudo dnf install -y unzip wget", 
+      "sudo dnf install -y unzip wget",
+
+      # For multicast DNS to use with socket_vmnet in Lima
+      "sudo dnf install -y crudini",
+      "sudo mkdir /etc/systemd/resolved.conf.d/ && sudo crudini --ini-options=nospace --set /etc/systemd/resolved.conf.d/mdns.conf Resolve MulticastDNS yes",
+
       "sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo",
       "sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
 
@@ -88,6 +93,15 @@ build {
 
       "sudo mkdir /opt/cni && sudo ln -s /usr/libexec/cni /opt/cni/bin",
 
+      # Provision Nomad and Consul CA's that can be later used for agent cert provisioning.
+      "sudo mkdir /etc/consul.d/certs && cd /etc/consul.d/certs ; sudo consul tls ca create",
+      "sudo mkdir /etc/nomad.d/certs && cd /etc/nomad.d/certs ; sudo nomad tls ca create",
+
+      # Set permissions for the certs directory
+      "sudo chown consul:consul /etc/consul.d/certs",
+      "sudo chown nomad:nomad /etc/nomad.d/certs",
+
+      # Enabling of the services is the responsibility of the instance provisioning scripts.
       "sudo systemctl disable docker consul nomad"
     ]
   }
