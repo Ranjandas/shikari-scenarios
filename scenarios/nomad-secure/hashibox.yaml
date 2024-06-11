@@ -1,0 +1,326 @@
+#images:
+#  # Try to use a local image first.
+#  - location: /Users/amit.chahal/Workdir/MyWorkHook/shikari-scenarios/packer/.artifacts/c-1.18-n-1.7/c-1.18-n-1.7.qcow2
+
+mounts: []
+containerd:
+  system: false
+  user: false
+provision:
+  - mode: system # Generate server & Clients TLS certs ONLY if they dont exist.
+    script: |
+      #!/bin/bash
+      #if [[ ! -e $CONSUL_CERTS_HOME/*server-consul-0* && ! -e $CONSUL_CERTS_HOME/*client-consul-0* ]]; then
+      if [[ ! -e $CONSUL_CERTS_HOME/*server-consul-0* ]]; then
+      
+        cd $CONSUL_CERTS_HOME && sudo consul tls cert create -server -dc=$CLUSTER
+        cd $CONSUL_CERTS_HOME && sudo consul tls cert create -client -dc=$CLUSTER
+
+        sudo chmod 644 /etc/consul.d/certs/*
+        chown consul:consul /etc/consul.d/certs/*
+      else
+        echo "Consul Certs/keys exists already, please check.."
+      fi
+
+  - mode: system # configure Consul
+    script: |
+      #!/bin/bash
+
+      function setConfig {
+          local mode=$1
+          local cluster=$2
+
+          # Set the config files accordingly 
+          if [[ $mode == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "INFO"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-$cluster-srv-01.internal"]
+        datacenter = "$cluster"
+         
+        #TLS block
+
+        tls {
+          defaults {
+            ca_file   = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+            key_file  = "$CONSUL_CERTS_HOME/$cluster-server-consul-0-key.pem"
+            cert_file = "$CONSUL_CERTS_HOME/$cluster-server-consul-0.pem"
+            verify_incoming = true
+            verify_outgoing = true
+          }
+          internal_rpc {
+            verify_server_hostname = true
+          }
+          https {
+            verify_incoming = false
+          }
+        }
+        
+        auto_encrypt {
+          allow_tls = true
+        }
+       
+        ports {
+          https = 8501
+          grpc = 8502
+          grpc_tls = 8503
+        } 
+
+        ui_config {
+          enabled = true
+        }
+
+        connect {
+          enabled = true
+        }
+
+        acl {              ## ACL Block for Consul Server 
+          enabled = true
+          down_policy = "extend-cache"
+          default_policy = "deny"
+          enable_token_persistence = true
+          tokens = {
+            initial_management = "root"
+            agent = "root"
+          }
+        }
+        server = true
+        bootstrap_expect = $BOOTSTRAP_EXPECT
+      EOF
+
+          elif [[ $mode == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "INFO"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-$cluster-srv-01.internal"]
+        datacenter = "$cluster"
+
+        connect {
+          enabled = true
+        }
+        
+        ports {
+          https = 8501
+          grpc = 8502
+          grpc_tls = 8503
+        }
+
+        acl {                 ## ACL Block for Consul Client
+          enabled = true
+          down_policy = "extend-cache"
+          default_policy = "deny"
+          enable_token_persistence = true
+          tokens = {
+            agent = "root"
+          }
+        }
+       
+        tls {
+          defaults {
+            ca_file   = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+            verify_incoming = true
+            verify_outgoing = true
+          }
+          internal_rpc {
+            verify_server_hostname = true
+          }
+          https {
+            verify_incoming = false
+          }
+        }
+        
+        auto_encrypt = {
+          tls = true
+        }
+        server = false
+      EOF
+          else
+            echo "Invalid mode for setConfig"
+          fi
+        }
+          # Check if the environment variable 'MODE' is set
+          if [[ -n $MODE ]]; then
+              echo "MODE is set to: $MODE"
+          else
+              echo "MODE is not set."
+          fi
+
+          # Check if the environment variable 'CLUSTER' is set
+          if [[ -n $CLUSTER ]]; then
+              echo "CLUSTER is set to: $CLUSTER"
+          else
+              echo "CLUSTER is not set."
+          fi
+          setConfig $MODE $CLUSTER
+
+  - mode: system # Generate server & Clients TLS certs
+    script: |
+      #!/bin/bash
+      if [[ ! -e $NOMAD_CERTS_HOME/*global-server-nomad* && ! -e $NOMAD_CERTS_HOME/*global-client-nomad* ]]; then
+
+        cd $NOMAD_CERTS_HOME && sudo nomad tls cert create -server
+        cd $NOMAD_CERTS_HOME && sudo nomad tls cert create -client
+        sudo chmod 644 /etc/nomad.d/certs/*
+        chown nomad:nomad /etc/nomad.d/certs/*
+      else
+        echo "Nomad certs/keys exist already, please check.."
+      fi
+
+  - mode: system # configure Nomad
+    script: |
+      #!/bin/bash    
+      function setConfig {
+          local mode=$1
+          local cluster=$2
+
+          # Set the config files accordingly 
+          if [[ $mode == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+          data_dir  = "/opt/nomad/data"
+          bind_addr = "0.0.0.0"
+         
+          acl {                 ## ACL Block for Nomad Server
+            enabled = true
+          }
+          consul {
+            address = "127.0.0.1:8501"
+            token = "root"
+            cert_file = "$CONSUL_CERTS_HOME/$cluster-client-consul-0.pem"
+            key_file = "$CONSUL_CERTS_HOME/$cluster-client-consul-0-key.pem"
+            ssl = true
+            grpc_ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+          }
+       
+          #TLS CONFIG
+          tls {  
+            http = true
+            rpc  = true
+            ca_file   = "$NOMAD_CERTS_HOME/nomad-agent-ca.pem"
+            cert_file = "$NOMAD_CERTS_HOME/global-$MODE-nomad.pem"
+            key_file  = "$NOMAD_CERTS_HOME/global-$MODE-nomad-key.pem"
+            verify_https_client = false
+           }
+
+          server {
+          #license_path = "/etc/nomad.d/license.hclic"
+          enabled = true
+          bootstrap_expect = $BOOTSTRAP_EXPECT
+
+          server_join {
+              retry_join = ["lima-$cluster-srv-01.internal"]
+          }
+          }
+          datacenter = "$cluster"
+
+          client {
+          enabled = true
+          servers = ["lima-$cluster-srv-01.internal"]
+          }
+      EOF
+
+          elif [[ $mode == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+          data_dir  = "/opt/nomad/data"
+          bind_addr = "0.0.0.0"
+          datacenter = "$cluster"
+
+          #TLS CONFIG
+          tls {
+            http = true
+            rpc  = true
+            ca_file   = "$NOMAD_CERTS_HOME/nomad-agent-ca.pem"
+            cert_file = "$NOMAD_CERTS_HOME/global-$MODE-nomad.pem"
+            key_file  = "$NOMAD_CERTS_HOME/global-$MODE-nomad-key.pem"
+            verify_https_client = false
+          } 
+
+          consul {
+            address = "127.0.0.1:8501"
+            token = "root"
+            cert_file = "$CONSUL_CERTS_HOME/$cluster-client-consul-0.pem"
+            key_file = "$CONSUL_CERTS_HOME/$cluster-client-consul-0-key.pem"
+            ssl = true
+            grpc_ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+          }
+
+          client {
+            enabled = true
+            servers = ["lima-$cluster-srv-01.internal"]
+          }
+      EOF
+          else
+              echo "Invalid mode for setConfig"
+          fi
+      }
+
+
+          # Check if the environment variable 'MODE' is set
+          if [[ -n $MODE ]]; then
+              echo "MODE is set to: $MODE"
+          else
+              echo "MODE is not set."
+          fi
+
+          # Check if the environment variable 'CLUSTER' is set
+          if [[ -n $CLUSTER ]]; then
+              echo "CLUSTER is set to: $CLUSTER"
+          else
+              echo "CLUSTER is not set."
+          fi
+
+          setConfig $MODE $CLUSTER
+
+## NOMAD ACL BOOTSTRAP WITH CHOICE TOKEN 
+  - mode: user
+    script: |
+      #!/bin/sh
+      if [[ $MODE == "server" ]]; then
+      # Wait for nomad servers to come up and bootstrap nomad ACL
+      for i in {1..10}; do
+          # add sleep 5 secs
+          set +e
+          sleep 5
+          OUTPUT=$(echo "$NOMAD_TOKEN"|nomad acl bootstrap - 2>&1)
+          #checks if the previous command (nomad acl bootstrap) failed (non-zero exit status).
+          if [ $? -ne 0 ]; then
+              echo "Nomad ACL Bootstrapping Error: $OUTPUT"
+              if [[ "$OUTPUT" = *"No cluster leader"* ]]; then
+                  echo "Nomad has no Cluster Leader!!"
+                  continue
+              else
+                  echo "$NOMAD_TOKEN"|nomad acl bootstrap - 2>&1
+                  echo "Nomad Bootstrapped!!"
+                  exit 0
+              fi
+          fi
+          set -e
+      done
+      fi
+
+  - mode:
+    script: |
+      systemctl enable --now docker
+      systemctl enable --now nomad consul
+  - mode: user
+    script: |
+      #!/bin/sh
+      nomad -autocomplete-install
+      consul -autocomplete-install
+networks:
+  - lima: user-v2
+vmType: qemu
+
+env:
+  CONSUL_HTTP_TOKEN: root
+  NOMAD_TOKEN: 00000000-0000-0000-0000-000000000000
+  NOMAD_CERTS_HOME: /etc/nomad.d/certs
+  #BOOTSTRAP_EXPECT: 1
+  NOMAD_ADDR: https://localhost:4646
+  CONSUL_CERTS_HOME: /etc/consul.d/certs
+  CONSUL_HTTP_ADDR: https://localhost:8501
+  CONSUL_HTTP_SSL_VERIFY: false
+  NOMAD_SKIP_VERIFY: true
