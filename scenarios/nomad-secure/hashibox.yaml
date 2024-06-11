@@ -10,7 +10,8 @@ provision:
   - mode: system # Generate server & Clients TLS certs ONLY if they dont exist.
     script: |
       #!/bin/bash
-      if [ ! -e $CONSUL_CERTS_HOME/*server-consul-0* && ! -e $CONSUL_CERTS_HOME/*client-consul-0* ]; then
+      #if [[ ! -e $CONSUL_CERTS_HOME/*server-consul-0* && ! -e $CONSUL_CERTS_HOME/*client-consul-0* ]]; then
+      if [[ ! -e $CONSUL_CERTS_HOME/*server-consul-0* ]]; then
       
         cd $CONSUL_CERTS_HOME && sudo consul tls cert create -server -dc=$CLUSTER
         cd $CONSUL_CERTS_HOME && sudo consul tls cert create -client -dc=$CLUSTER
@@ -159,7 +160,7 @@ provision:
   - mode: system # Generate server & Clients TLS certs
     script: |
       #!/bin/bash
-      if [ ! -e $NOMAD_CERTS_HOME/*global-server-nomad* && ! -e $NOMAD_CERTS_HOME/*global-client-nomad* ]; then
+      if [[ ! -e $NOMAD_CERTS_HOME/*global-server-nomad* && ! -e $NOMAD_CERTS_HOME/*global-client-nomad* ]]; then
 
         cd $NOMAD_CERTS_HOME && sudo nomad tls cert create -server
         cd $NOMAD_CERTS_HOME && sudo nomad tls cert create -client
@@ -234,6 +235,7 @@ provision:
             ca_file   = "$NOMAD_CERTS_HOME/nomad-agent-ca.pem"
             cert_file = "$NOMAD_CERTS_HOME/global-$MODE-nomad.pem"
             key_file  = "$NOMAD_CERTS_HOME/global-$MODE-nomad-key.pem"
+            verify_https_client = false
           } 
 
           consul {
@@ -320,3 +322,5 @@ env:
   NOMAD_ADDR: https://localhost:4646
   CONSUL_CERTS_HOME: /etc/consul.d/certs
   CONSUL_HTTP_ADDR: https://localhost:8501
+  CONSUL_HTTP_SSL_VERIFY: false
+  NOMAD_SKIP_VERIFY: true
