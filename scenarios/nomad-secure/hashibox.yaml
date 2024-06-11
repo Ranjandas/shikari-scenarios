@@ -7,6 +7,20 @@ containerd:
   system: false
   user: false
 provision:
+  - mode: system # Generate server & Clients TLS certs ONLY if they dont exist.
+    script: |
+      #!/bin/bash
+      if [ ! -e $CONSUL_CERTS_HOME/*server-consul-0* ]; then
+      
+        cd $CONSUL_CERTS_HOME && sudo consul tls cert create -server -dc=$CLUSTER
+        cd $CONSUL_CERTS_HOME && sudo consul tls cert create -client -dc=$CLUSTER
+
+        sudo chmod 644 /etc/consul.d/certs/*
+        chown consul:consul /etc/consul.d/certs/*
+      else
+        echo "Consul Certs/keys exists already, please check.."
+      fi
+
   - mode: system # configure Consul
     script: |
       #!/bin/bash
@@ -24,6 +38,34 @@ provision:
         client_addr = "0.0.0.0"
         retry_join = ["lima-$cluster-srv-01.internal"]
         datacenter = "$cluster"
+         
+        #TLS block
+
+        tls {
+          defaults {
+            ca_file   = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+            key_file  = "$CONSUL_CERTS_HOME/$cluster-server-consul-0-key.pem"
+            cert_file = "$CONSUL_CERTS_HOME/$cluster-server-consul-0.pem"
+            verify_incoming = true
+            verify_outgoing = true
+          }
+          internal_rpc {
+            verify_server_hostname = true
+          }
+          https {
+            verify_incoming = false
+          }
+        }
+        
+        auto_encrypt {
+          allow_tls = true
+        }
+       
+        ports {
+          https = 8501
+          grpc = 8502
+          grpc_tls = 8503
+        } 
 
         ui_config {
           enabled = true
@@ -75,23 +117,30 @@ provision:
             agent = "root"
           }
         }
-  
-        verify_incoming = false
-        verify_outgoing = true
-        verify_server_hostname = true
-        ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+       
+        tls {
+          defaults {
+            ca_file   = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+            verify_incoming = true
+            verify_outgoing = true
+          }
+          internal_rpc {
+            verify_server_hostname = true
+          }
+          https {
+            verify_incoming = false
+          }
+        }
+        
         auto_encrypt = {
           tls = true
         }
-
-
         server = false
       EOF
           else
             echo "Invalid mode for setConfig"
           fi
         }
-
           # Check if the environment variable 'MODE' is set
           if [[ -n $MODE ]]; then
               echo "MODE is set to: $MODE"
@@ -109,13 +158,16 @@ provision:
 
   - mode: system # Generate server & Clients TLS certs
     script: |
-      sleep 5
-      cd $NOMAD_CERTS_HOME && sudo nomad tls cert create -server
-      sleep 5
-      cd $NOMAD_CERTS_HOME && sudo nomad tls cert create -client
-      sleep 2
-      cd $NOMAD_CERTS_HOME && sudo nomad tls cert create -cli
-      sudo chmod 644 /etc/nomad.d/certs/*
+      #!/bin/bash
+      if [ ! -e $NOMAD_CERTS_HOME/*global-$MODE-nomad* ]; then
+
+        cd $NOMAD_CERTS_HOME && sudo nomad tls cert create -server
+        cd $NOMAD_CERTS_HOME && sudo nomad tls cert create -client
+        sudo chmod 644 /etc/nomad.d/certs/*
+        chown nomad:nomad /etc/nomad.d/certs/*
+      else
+        echo "Nomad certs/keys exist already, please check.."
+      fi
 
   - mode: system # configure Nomad
     script: |
@@ -136,8 +188,8 @@ provision:
           consul {
             address = "127.0.0.1:8501"
             token = "root"
-            cert_file = "$CONSUL_CERTS_HOME/dc1-client-consul-0.pem"
-            key_file = "$CONSUL_CERTS_HOME/dc1-client-consul-0-key.pem"
+            cert_file = "$CONSUL_CERTS_HOME/$cluster-client-consul-0.pem"
+            key_file = "$CONSUL_CERTS_HOME/$cluster-client-consul-0-key.pem"
             ssl = true
             grpc_ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
           }
@@ -149,6 +201,7 @@ provision:
             ca_file   = "$NOMAD_CERTS_HOME/nomad-agent-ca.pem"
             cert_file = "$NOMAD_CERTS_HOME/global-$MODE-nomad.pem"
             key_file  = "$NOMAD_CERTS_HOME/global-$MODE-nomad-key.pem"
+            verify_https_client = false
            }
 
           server {
@@ -186,8 +239,8 @@ provision:
           consul {
             address = "127.0.0.1:8501"
             token = "root"
-            cert_file = "$CONSUL_CERTS_HOME/dc1-client-consul-0.pem"
-            key_file = "$CONSUL_CERTS_HOME/dc1-client-consul-0-key.pem"
+            cert_file = "$CONSUL_CERTS_HOME/$cluster-client-consul-0.pem"
+            key_file = "$CONSUL_CERTS_HOME/$cluster-client-consul-0-key.pem"
             ssl = true
             grpc_ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
           }
@@ -263,13 +316,7 @@ env:
   CONSUL_HTTP_TOKEN: root
   NOMAD_TOKEN: 00000000-0000-0000-0000-000000000000
   NOMAD_CERTS_HOME: /etc/nomad.d/certs
-  NOMAD_CACERT: /etc/nomad.d/certs/nomad-agent-ca.pem
-  NOMAD_CLIENT_CERT: /etc/nomad.d/certs/global-cli-nomad.pem
-  NOMAD_CLIENT_KEY: /etc/nomad.d/certs/global-cli-nomad-key.pem
-  BOOTSTRAP_EXPECT: 1
+  #BOOTSTRAP_EXPECT: 1
   NOMAD_ADDR: https://localhost:4646
   CONSUL_CERTS_HOME: /etc/consul.d/certs
-  CONSUL_CACERT: /etc/consul.d/certs/consul-agent-ca.pem
-  CONSUL_CLIENT_CERT: /etc/consul.d/certs/dc1-client-consul-0.pem
-  CONSUL_CLIENT_KEY: /etc/consul.d/certs/dc1-client-consul-0-key.pem
   CONSUL_HTTP_ADDR: https://localhost:8501
