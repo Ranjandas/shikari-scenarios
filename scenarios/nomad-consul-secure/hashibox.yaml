@@ -1,0 +1,234 @@
+images:
+  # Try to use a local image first.
+  - location: ~/artifacts/qemu/c-1.18-n-1.7/c-1.18-n-1.7.qcow2
+
+
+# disable port-mapping, mounts, containerd etc
+plain: true
+
+provision:
+  - mode: system # install Consul and Nomad Licenses if any
+    script: |
+      #!/bin/bash
+
+      if [[ -n $CONSUL_LICENSE ]]; then
+        echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+      fi
+
+      if [[ -n $NOMAD_LICENSE ]]; then
+        echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
+      fi
+
+  - mode:  system # Configure Consul common settings
+    script: |
+      #!/bin/bash
+
+      # common config for Server and Client
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "INFO"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-$CLUSTER-srv-01.local"]
+        datacenter = "$CLUSTER"
+
+        ui_config {
+          enabled = true
+        }
+      EOF
+
+      cat <<-EOF > /etc/consul.d/acl.hcl
+        acl {
+          enabled = true
+          default_policy = "deny"
+          down_policy = "extend-cache"
+          
+          enable_token_persistence = true
+
+          tokens {
+            initial_management = "root"
+            agent = "root"
+          }
+        }
+      EOF
+
+
+      ## Generate Consul Server Certificates
+
+      cd /etc/consul.d/certs
+      consul tls cert create -$MODE -dc $CLUSTER -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local')
+      chown consul:consul /etc/consul.d/certs/*
+      chmod 644 /etc/consul.d/certs/*
+
+      cat <<-EOF > /etc/consul.d/tls.hcl
+        tls {
+          defaults {
+            ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
+            cert_file = "/etc/consul.d/certs/$CLUSTER-$MODE-consul-0.pem"
+            key_file = "/etc/consul.d/certs/$CLUSTER-$MODE-consul-0-key.pem"
+            verify_server_hostname = true
+            verify_incoming = true
+            verify_outgoing = true
+          }
+          grpc {
+            verify_incoming = false
+          }
+          https {
+            verify_incoming = false
+          }
+        }
+      EOF
+
+  - mode: system # Configure Consul server settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/server.hcl
+        connect {
+          enabled = true
+        }
+
+        server = true
+        bootstrap_expect = $BOOTSTRAP_EXPECT
+      EOF
+
+      cat <<-EOF > /etc/consul.d/ports.hcl
+      ports {
+        https = 8501
+      }
+      EOF
+
+      fi
+
+  - mode: system # Configure Consul client settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/client.hcl
+        ports {
+          grpc = 8502
+          grpc_tls = 8503
+          https = 8501
+        }
+      EOF
+      fi
+
+  - mode: system # Configure Nomad common settings
+    script: |
+      #!/bin/bash
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+        data_dir  = "/opt/nomad/data"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        datacenter = "$CLUSTER"
+
+        addresses {
+          http = "0.0.0.0"
+        }
+      EOF
+
+      cat <<-EOF > /etc/nomad.d/acl.hcl
+      acl {
+        enabled = true
+      }
+      EOF
+
+      ## Generate TLS Certificates
+
+      cd /etc/nomad.d/certs
+      nomad tls cert create -$MODE -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local')
+
+      cat <<-EOF > /etc/nomad.d/tls.hcl
+      tls {
+        http = true
+        rpc = true
+
+        ca_file = "/etc/nomad.d/certs/nomad-agent-ca.pem"
+        cert_file = "/etc/nomad.d/certs/global-$MODE-nomad.pem"
+        key_file = "/etc/nomad.d/certs/global-$MODE-nomad-key.pem"
+
+        verify_server_hostname = true
+      }
+      EOF
+
+      cat <<-EOF > /etc/nomad.d/consul.hcl
+      consul {
+        address = "127.0.0.1:8501"
+        token = "root"
+        ssl = true
+        ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
+        grpc_ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
+      }
+      EOF
+
+  - mode: system # configure Nomad server settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/server.hcl
+        server {
+        #license_path = "/etc/nomad.d/license.hclic"
+        enabled = true
+        bootstrap_expect = $BOOTSTRAP_EXPECT
+
+          server_join {
+            retry_join = ["lima-$CLUSTER-srv-01.local"]
+          }
+        }
+      EOF
+      fi
+
+  - mode: system # configure Nomad client settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/client.hcl
+        client {
+          enabled = true
+          servers = ["lima-$CLUSTER-srv-01.local"]
+        }
+      EOF
+      fi
+  - mode: system
+    script: |
+      systemctl enable --now docker
+      systemctl enable --now nomad consul
+
+  - mode: system # Bootstrap Nomad ACL
+    script: |
+      #!/bin/sh
+      if [[ $MODE == "server" ]]; then
+      # Wait for nomad servers to come up and bootstrap nomad ACL
+      for i in {1..10}; do
+          # add sleep 5 secs
+          set +e
+          sleep 5
+          export NOMAD_ADDR=https://127.0.0.1:4646
+          export NOMAD_CACERT=/etc/nomad.d/certs/nomad-agent-ca.pem
+          OUTPUT=$(echo "00000000-0000-0000-0000-000000000000"|nomad acl bootstrap - 2>&1)
+          # checks if the previous command (nomad acl bootstrap) failed (non-zero exit status).
+          if [ $? -ne 0 ]; then
+              echo "nomad acl bootstrap: $OUTPUT"
+              if [[ "$OUTPUT" = *"No cluster leader"* ]]; then
+                  echo "nomad has no cluster leader"
+                  continue
+              else
+                  echo "nomad already bootstrapped"
+                  exit 0
+              fi
+          fi
+          set -e
+      done
+      fi
+      
+  - mode: user
+    script: |
+      #!/bin/sh
+      nomad -autocomplete-install
+      consul -autocomplete-install
+networks:
+  - lima: shared
+vmType: qemu
