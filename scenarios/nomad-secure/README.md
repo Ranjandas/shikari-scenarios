@@ -17,7 +17,7 @@ The following tools are required to run these scenarios:
 **NOTE**📝: All the above except Shikari tool can be installed using Homebrew
 
 ## Usage
-Perform the following steps to execute Workload-Identity jobs for consul.
+Perform the following steps to execute ACL/TLS equipped jobs for Consul and Nomad
 1. Execute the below command for shikari to spin up nomad and consul cluster
 
 >For Example: `$ shikari create -n dc1 -s 1 -c 1 -t ../shikari-scenarios/scenarios/nomad-secure/hashibox.yaml`
