@@ -1,18 +1,16 @@
 # Shikari "Nomad-Secure" scenario with ACLs and TLS enabled
 This specific scenario run Nomad(alongside Consul) with ACLs and TLS enabled.
-Once the cluster is spun, TLS is enabled fully Except, the CLI access doesnt need to use CACERT and CLIENT_CERT/CLIENT_KEY to interact with Nomad and Consul, as `https` access has been set to false using ENV Variables.
-The ACL tokens for Nomad and Consul have been hardcoded for ease of use for Demo and Repro reasons.
+Once the cluster is spun, TLS is enabled fully Except, the CLI access doesnt need to use CACERT and CLIENT_CERT/CLIENT_KEY to interact with Nomad and Consul, as `HTTPS` endpoints are not configured to have client certificate authentication. The ACL tokens for Nomad and Consul have been hardcoded for ease of use for Demo and Repro reasons.
 
 ## Prerequisites
 The following tools are required to run these scenarios:
 
-- HashiCorp Packer (if you are building custom images)
 - CDRtools (if you are building custom images)
 - Lima
 - Shikari
 - Nomad and Consul ACL and TLS Documentation
 - Supported Consul & Nomad Version
-- Requires Packer build using enterprise binary for consul and nomad, update the [variables.pkvars.hcl] file.
+- Requires Packer build using Consul and Nomad binaries, may need to update the [variables.pkvars.hcl] file incase there's a need to change versions than default.
 
 **NOTE**📝: All the above except Shikari tool can be installed using Homebrew
 
@@ -20,20 +18,20 @@ The following tools are required to run these scenarios:
 Perform the following steps to execute ACL/TLS equipped jobs for Consul and Nomad
 1. Execute the below command for shikari to spin up nomad and consul cluster
 
->For Example: `$ shikari create -n dc1 -s 1 -c 1 -t ../shikari-scenarios/scenarios/nomad-secure/hashibox.yaml`
-> <p>where: </p>
-> <p>-s : Nomad servers count \n </p>
-> <p>-c : Nomad clients count</p>
-> <p>-t : template file to be used</p>
-
+#### For example:  
+- `$ shikari create -n dc1 -s 1 -c 1 -i <.qcow2_packer_image_location>
+```
+where: 
+-s : Nomad servers count
+-c : Nomad clients count
+-i : packer image location
+```
 
 2. Export the below CONSUL and NOMAD ENV variables for ACLs and TLS, as shown below :
 ```
   export CONSUL_HTTP_TOKEN: root
   export NOMAD_TOKEN: 00000000-0000-0000-0000-000000000000
-  export NOMAD_CERTS_HOME: /etc/nomad.d/certs
   export NOMAD_ADDR: https://localhost:4646
-  export CONSUL_CERTS_HOME: /etc/consul.d/certs
   export CONSUL_HTTP_ADDR: https://localhost:8501
   export CONSUL_HTTP_SSL_VERIFY: false
   export NOMAD_SKIP_VERIFY: true
@@ -47,10 +45,10 @@ $ consul members
 $ consul operator raft list-peers
 ```
 
-4. Check the health of Nomad and consul using `systemd` logs as below :
+4. Check the health of Nomad and consul using `systemd` logs, by exec'ing into VMs as below :
 ```
-   sudo journalctl -u nomad
-   sudo journalctl -u consul
+   shikari exec -n test -s  "sudo journalctl -u nomad"
+   shikari exec -n test -s  "sudo journalctl -u consul"
 ```
 📝: The above commands output will reflect in logs that TLS/ACL is enabled, and will provide general logging. Please make sure we dont see any ACL/TLS related errors.
 
@@ -68,9 +66,7 @@ $ shikari stop -n dc1
 $ shikari destroy -n  -f
 unset CONSUL_HTTP_TOKEN: root
 unset NOMAD_TOKEN: 00000000-0000-0000-0000-000000000000
-unset NOMAD_CERTS_HOME: /etc/nomad.d/certs
 unset NOMAD_ADDR: https://localhost:4646
-unset CONSUL_CERTS_HOME: /etc/consul.d/certs
 unset CONSUL_HTTP_ADDR: https://localhost:8501
 unset CONSUL_HTTP_SSL_VERIFY: false
 unset NOMAD_SKIP_VERIFY: true
