@@ -19,7 +19,7 @@ Perform the following steps to execute ACL/TLS equipped jobs for Consul and Noma
 1. Execute the below command for shikari to spin up nomad and consul cluster
 
 #### For example:  
-- `$ shikari create -n dc1 -s 1 -c 1 -i <.qcow2_packer_image_location>
+- `$ shikari create -n dc1 -s 1 -c 1 -i <.qcow2_packer_image_location>`
 ```
 where: 
 -s : Nomad servers count
