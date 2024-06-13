@@ -10,7 +10,21 @@ The following tools are required to run these scenarios:
 * [Lima](https://lima-vm.io/)
 * [Shikari](https://github.com/ranjandas/shikari)
 
-> NOTE: all the above except shikari can be installed using Homebrew
+You can use the Brewfile shipped in this repository to install all the dependent tools.
+
+```
+brew bundle
+Using hashicorp/tap
+==> Downloading https://formulae.brew.sh/api/formula.jws.json
+
+Using hashicorp/tap/packer
+Using hashicorp/tap/nomad
+Using hashicorp/tap/consul
+Using cdrtools
+Using lima
+Using socket_vmnet
+Homebrew Bundle complete! 7 Brewfile dependencies now installed.
+```
 
 ## Usage
 
