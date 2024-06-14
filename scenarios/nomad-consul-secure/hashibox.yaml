@@ -112,6 +112,8 @@ provision:
           grpc_tls = 8503
           https = 8501
         }
+
+        recursors = ["1.1.1.1", "8.8.8.8"]
       EOF
       fi
 
@@ -120,11 +122,14 @@ provision:
       #!/bin/bash
       cat <<-EOF > /etc/nomad.d/nomad.hcl
         data_dir  = "/opt/nomad/data"
-        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        # bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        bind_addr = "0.0.0.0"
         datacenter = "$CLUSTER"
 
-        addresses {
-          http = "0.0.0.0"
+        advertise {
+          http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          rpc = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          serf = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
         }
       EOF
 
@@ -189,6 +194,8 @@ provision:
         client {
           enabled = true
           servers = ["lima-$CLUSTER-srv-01.local"]
+
+          network_interface = "lima0"
         }
       EOF
       fi
