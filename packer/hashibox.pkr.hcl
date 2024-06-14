@@ -19,6 +19,12 @@ variable "nomad_version" {
   description = "Nomad version to install"
 }
 
+variable "consul_cni_version" {
+  type        = string
+  default     = "1.5.0"
+  description = "Consul CNI version to install"
+}
+
 variable "fedora_iso_url" {
   type = string
   default     = "https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/aarch64/images/Fedora-Cloud-Base-Generic.aarch64-40-1.14.qcow2"
@@ -82,7 +88,8 @@ build {
   provisioner "shell" {
     environment_vars = [
       "CONSUL_VERSION=${var.consul_version}",
-      "NOMAD_VERSION=${var.nomad_version}"
+      "NOMAD_VERSION=${var.nomad_version}",
+      "CONSUL_CNI_VERSION=${var.consul_cni_version}"
     ]
     inline = [
       "sudo dnf clean all",
@@ -99,6 +106,10 @@ build {
       "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* containernetworking-plugins",
 
       "sudo mkdir /opt/cni && sudo ln -s /usr/libexec/cni /opt/cni/bin",
+
+      # Consul CNI Binary, required for Nomad Transparent Proxy Support.
+      "curl -L -o /tmp/consul-cni.zip https://releases.hashicorp.com/consul-cni/$${CONSUL_CNI_VERSION}/consul-cni_$${CONSUL_CNI_VERSION}_linux_$( [ $(uname -m) = aarch64 ] && echo arm64 || echo amd64).zip",
+      "sudo unzip /tmp/consul-cni.zip -d /usr/libexec/cni/",
 
       # Provision Nomad and Consul CA's that can be later used for agent cert provisioning.
       "sudo mkdir /etc/consul.d/certs && cd /etc/consul.d/certs ; sudo consul tls ca create",
