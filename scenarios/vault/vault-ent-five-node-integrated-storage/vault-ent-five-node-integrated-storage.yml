@@ -123,6 +123,10 @@ provision:
         VAULT_ADDR="http://lima-${CLUSTER}-srv-02.internal:8200" vault operator unseal $VAULT_UNSEAL_KEY
         sleep 60
         VAULT_ADDR="http://lima-${CLUSTER}-srv-03.internal:8200" vault operator unseal $VAULT_UNSEAL_KEY
+        sleep 60
+        VAULT_ADDR="http://lima-${CLUSTER}-srv-04.internal:8200" vault operator unseal $VAULT_UNSEAL_KEY
+        sleep 60
+        VAULT_ADDR="http://lima-${CLUSTER}-srv-05.internal:8200" vault operator unseal $VAULT_UNSEAL_KEY
         sleep 15
         vault operator raft list-peers
       fi
