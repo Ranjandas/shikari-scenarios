@@ -58,6 +58,9 @@ provision:
 
       if [[ $MODE == "client" ]]; then
       cat <<-EOF > /etc/consul.d/client.hcl
+
+        recursors = ["1.1.1.1", "8.8.8.8"]
+
         ports {
           grpc = 8502
         }
