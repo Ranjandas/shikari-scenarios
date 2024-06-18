@@ -110,6 +110,8 @@ provision:
         client {
           enabled = true
           servers = ["lima-$CLUSTER-srv-01.local"]
+
+          network_interface = "lima0"
         }
       EOF
       fi
