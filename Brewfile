@@ -5,6 +5,7 @@ brew "hashicorp/tap/nomad"
 brew "hashicorp/tap/consul"
 
 brew "cdrtools"
+brew "qemu"
 
 brew "lima"
 brew "socket_vmnet"
