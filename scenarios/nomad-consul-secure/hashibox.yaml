@@ -3,7 +3,6 @@ images:
   - location: ~/artifacts/qemu/c-1.18-n-1.7/c-1.18-n-1.7.qcow2
 
 
-# disable port-mapping, mounts, containerd etc
 plain: true
 
 provision:
@@ -26,7 +25,7 @@ provision:
       # common config for Server and Client
       cat <<-EOF > /etc/consul.d/consul.hcl
         data_dir  = "/opt/consul/data"
-        log_level  = "INFO"
+        log_level  = "DEBUG"
         bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
         client_addr = "0.0.0.0"
         retry_join = ["lima-$CLUSTER-srv-01.local"]
@@ -47,7 +46,6 @@ provision:
 
           tokens {
             initial_management = "root"
-            agent = "root"
           }
         }
       EOF
@@ -122,9 +120,9 @@ provision:
       #!/bin/bash
       cat <<-EOF > /etc/nomad.d/nomad.hcl
         data_dir  = "/opt/nomad/data"
-        # bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
         bind_addr = "0.0.0.0"
         datacenter = "$CLUSTER"
+        log_level = "DEBUG"
 
         advertise {
           http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
@@ -207,7 +205,7 @@ provision:
   - mode: system # Bootstrap Nomad ACL
     script: |
       #!/bin/sh
-      if [[ $MODE == "server" ]]; then
+      if echo $HOSTNAME | grep srv-01$ > /dev/null 2>&1; then
       # Wait for nomad servers to come up and bootstrap nomad ACL
       for i in {1..10}; do
           # add sleep 5 secs
@@ -229,6 +227,35 @@ provision:
           fi
           set -e
       done
+      fi
+
+  - mode: system
+    script: |
+      #!/bin/sh
+
+      export CONSUL_HTTP_ADDR=https://localhost:8501
+      export CONSUL_CACERT=/etc/consul.d/certs/consul-agent-ca.pem
+      export CONSUL_HTTP_TOKEN=root
+
+      until curl -s -k ${CONSUL_HTTP_ADDR}/v1/status/leader | grep 8300; do
+        echo "Waiting for Consul to start"
+        sleep 1
+      done
+
+      agent_token=$(consul acl token create -node-identity $(hostname):$CLUSTER -format json | jq -r '.SecretID')
+      consul acl set-agent-token agent $agent_token
+
+
+      # Update anonymous token policy from the first server
+
+      if echo $HOSTNAME | grep srv-01$ > /dev/null 2>&1; then
+        if consul version | head -n 1 | grep ent > /dev/null 2>&1; then
+          acl_rule='partition "default" { namespace "default" { query_prefix "" { policy = "read" } } } partition_prefix "" { namespace_prefix "" { node_prefix "" { policy = "read" } service_prefix "" { policy = "read" } } }'
+        else
+          acl_rule='node_prefix "" { policy = "read" } service_prefix "" { policy = "read" } query_prefix "" { policy = "read" }'
+        fi
+        echo $acl_rule | consul acl policy create -name anon-policy -rules=-
+        consul acl token update -accessor-id=00000000-0000-0000-0000-000000000002 --policy-name anon-policy
       fi
       
   - mode: user

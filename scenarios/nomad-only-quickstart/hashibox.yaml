@@ -24,8 +24,14 @@ provision:
       #!/bin/bash
       cat <<-EOF > /etc/nomad.d/nomad.hcl
         data_dir  = "/opt/nomad/data"
-        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
-        datacenter = "$CLUSTER"
+        bind_addr = "0.0.0.0"
+        log_level = "DEBUG"
+
+        advertise {
+          http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          rpc = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          serf = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        }
       EOF
 
   - mode: system # configure Nomad server settings
