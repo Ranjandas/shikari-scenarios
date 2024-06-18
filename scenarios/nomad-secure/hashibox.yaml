@@ -193,6 +193,7 @@ provision:
             key_file = "$CONSUL_CERTS_HOME/$cluster-client-consul-0-key.pem"
             ssl = true
             grpc_ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+            ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
           }
        
           #TLS CONFIG
@@ -245,6 +246,7 @@ provision:
             key_file = "$CONSUL_CERTS_HOME/$cluster-client-consul-0-key.pem"
             ssl = true
             grpc_ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
+            ca_file = "$CONSUL_CERTS_HOME/consul-agent-ca.pem"
           }
 
           client {
