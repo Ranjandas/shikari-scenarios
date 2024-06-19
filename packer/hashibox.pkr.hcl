@@ -7,6 +7,12 @@ packer {
   }
 }
 
+variable "arch" {
+  type        = string
+  default     = "aarch64"
+  description = "Architecture of the machine where you'd run the image"
+}
+
 variable "consul_version" {
   type        = string
   default     = "1.18"
@@ -26,25 +32,37 @@ variable "consul_cni_version" {
 }
 
 variable "source_image_url" {
-  type = string
+  type        = string
   default     = "https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/aarch64/images/Fedora-Cloud-Base-Generic.aarch64-40-1.14.qcow2"
   description = "Fedora Cloud Image URL - qcow2 format"
 }
 
 variable "source_image_checksum" {
-  type = string
+  type        = string
   default     = "file:https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/aarch64/images/Fedora-Cloud-40-1.14-aarch64-CHECKSUM"
   description = "Checksum in the packer format of the cloud image"
 }
 
+locals {
+  qemu_binary       = "${var.arch == "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64"}"
+  accelerator       = "hvf"
+  cpu_model         = "${var.arch == "aarch64" ? "cortex-a57" : "qemu64"}"
+  machine_type      = "${var.arch == "aarch64" ? "virt" : "pc"}"
+  efi_boot          = "${var.arch == "aarch64" ? true : false}"
+  efi_firmware_code = "${var.arch == "aarch64" ? "/opt/homebrew/share/qemu/edk2-aarch64-code.fd" : ""}"
+  efi_firmware_vars = "${var.arch == "aarch64" ? "/opt/homebrew/share/qemu/edk2-arm-vars.fd" : ""}"
+
+  source_image_url = "${var.arch == "aarch64" ? var.source_image_url : replace(var.source_image_url, "aarch64", "x86_64")}"
+  source_image_checksum = "${var.arch == "aarch64" ? var.source_image_checksum : replace(var.source_image_checksum, "aarch64", "x86_64")}" 
+}
+
 source "qemu" "hashibox" {
-  iso_url      = "${var.source_image_url}"
-  iso_checksum = "${var.source_image_checksum}"
+  iso_url      = "${local.source_image_url}"
+  iso_checksum = "${local.source_image_checksum}"
 
   headless = true
 
   disk_compression = true
- # disk_size        = "5G"
   disk_interface   = "virtio"
   disk_image       = true
 
@@ -55,18 +73,16 @@ source "qemu" "hashibox" {
 
   output_directory = ".artifacts/c-${var.consul_version}-n-${var.nomad_version}"
 
-  qemu_binary  = "qemu-system-aarch64"
-  accelerator  = "hvf"
-  cpu_model    = "cortex-a57"
-  machine_type = "virt"
-
   cpus   = 8
   memory = 5120
 
-
-  efi_boot          = true
-  efi_firmware_code = "/opt/homebrew/share/qemu/edk2-aarch64-code.fd"
-  efi_firmware_vars = "/opt/homebrew/share/qemu/edk2-arm-vars.fd"
+  qemu_binary       = "${local.qemu_binary}"
+  accelerator       = "hvf"
+  cpu_model         = "${local.cpu_model}"
+  machine_type      = "${local.machine_type}"
+  efi_boot          = "${local.efi_boot}"
+  efi_firmware_code = "${local.efi_firmware_code}"
+  efi_firmware_vars = "${local.efi_firmware_vars}"
 
   qemuargs = [
     ["-cdrom", "userdata/cidata.iso"],
@@ -79,7 +95,7 @@ source "qemu" "hashibox" {
   ssh_password     = "shikari"
   ssh_username     = "shikari"
 
-  ssh_timeout      = "10m"
+  ssh_timeout = "10m"
 }
 
 build {
@@ -99,7 +115,7 @@ build {
       "source /etc/os-release && [[ $ID != fedora ]] && sudo dnf install -y epel-release systemd-resolved && sudo systemctl enable --now systemd-resolved",
       "sudo dnf install -y crudini $([ $(source /etc/os-release && echo $ID) != fedora ] && echo --enablerepo=epel)",
       "sudo mkdir /etc/systemd/resolved.conf.d/ && sudo crudini --ini-options=nospace --set /etc/systemd/resolved.conf.d/mdns.conf Resolve MulticastDNS yes",
-      
+
       # With systemd-resolved enabled, we should use the stub-resolver for mDNS to work.
       "sudo rm /etc/resolv.conf && sudo ln -s /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf",
 
