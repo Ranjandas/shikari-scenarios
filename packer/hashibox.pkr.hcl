@@ -25,26 +25,26 @@ variable "consul_cni_version" {
   description = "Consul CNI version to install"
 }
 
-variable "fedora_iso_url" {
+variable "source_image_url" {
   type = string
   default     = "https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/aarch64/images/Fedora-Cloud-Base-Generic.aarch64-40-1.14.qcow2"
   description = "Fedora Cloud Image URL - qcow2 format"
 }
 
-variable "fedora_iso_checksum" {
+variable "source_image_checksum" {
   type = string
   default     = "file:https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/aarch64/images/Fedora-Cloud-40-1.14-aarch64-CHECKSUM"
   description = "Checksum in the packer format of the cloud image"
 }
 
 source "qemu" "hashibox" {
-  iso_url      = "${var.fedora_iso_url}"
-  iso_checksum = "${var.fedora_iso_checksum}"
+  iso_url      = "${var.source_image_url}"
+  iso_checksum = "${var.source_image_checksum}"
 
   headless = true
 
   disk_compression = true
-  disk_size        = "5G"
+ # disk_size        = "5G"
   disk_interface   = "virtio"
   disk_image       = true
 
@@ -75,9 +75,9 @@ source "qemu" "hashibox" {
   ]
 
   communicator     = "ssh"
-  shutdown_command = "echo fedora | sudo -S shutdown -P now"
-  ssh_password     = "fedora"
-  ssh_username     = "fedora"
+  shutdown_command = "echo shikari | sudo -S shutdown -P now"
+  ssh_password     = "shikari"
+  ssh_username     = "shikari"
 
   ssh_timeout      = "10m"
 }
@@ -95,16 +95,23 @@ build {
       "sudo dnf clean all",
       "sudo dnf install -y unzip wget",
 
-      # For multicast DNS to use with socket_vmnet in Lima
-      "sudo dnf install -y crudini",
+      # For multicast DNS to use with socket_vmnet in Lima we use systemd-resolved. For rocky we have to install epel repo for Crudini.
+      "source /etc/os-release && [[ $ID != fedora ]] && sudo dnf install -y epel-release systemd-resolved && sudo systemctl enable --now systemd-resolved",
+      "sudo dnf install -y crudini $([ $(source /etc/os-release && echo $ID) != fedora ] && echo --enablerepo=epel)",
       "sudo mkdir /etc/systemd/resolved.conf.d/ && sudo crudini --ini-options=nospace --set /etc/systemd/resolved.conf.d/mdns.conf Resolve MulticastDNS yes",
+      
+      # With systemd-resolved enabled, we should use the stub-resolver for mDNS to work.
+      "sudo rm /etc/resolv.conf && sudo ln -s /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf",
 
-      "sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo",
+      # Enable Docker repository and install Docker-CE
+      "sudo dnf config-manager --add-repo https://download.docker.com/linux/$([ $(source /etc/os-release && echo $ID) == fedora ] && echo fedora || echo rhel)/docker-ce.repo",
       "sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
 
-      "sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/fedora/hashicorp.repo",
+      # Enable HashiCorp Repository and install the required packages including CNI libs
+      "sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/$([ $(source /etc/os-release && echo $ID) == fedora ] && echo fedora || echo RHEL)/hashicorp.repo",
       "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* containernetworking-plugins",
 
+      # Nomad expects CNI binaries to be under /opt/cni/bin by default. We use symlink to avoid configuring alternate path in Nomad.
       "sudo mkdir /opt/cni && sudo ln -s /usr/libexec/cni /opt/cni/bin",
 
       # Consul CNI Binary, required for Nomad Transparent Proxy Support.
