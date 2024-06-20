@@ -35,9 +35,9 @@ provision:
       cat <<-EOF > /etc/consul.d/consul.hcl
         data_dir  = "/opt/consul/data"
         log_level  = "INFO"
-        bind_addr = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
         client_addr = "0.0.0.0"
-        retry_join = ["lima-$cluster-srv-01.internal"]
+        retry_join = ["lima-$cluster-srv-01.local"]
         datacenter = "$cluster"
          
         #TLS block
@@ -94,9 +94,9 @@ provision:
       cat <<-EOF > /etc/consul.d/consul.hcl
         data_dir  = "/opt/consul/data"
         log_level  = "INFO"
-        bind_addr = {{ "\"{{ GetInterfaceIP \\\"eth0\\\"}}\"" }}
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
         client_addr = "0.0.0.0"
-        retry_join = ["lima-$cluster-srv-01.internal"]
+        retry_join = ["lima-$cluster-srv-01.local"]
         datacenter = "$cluster"
 
         connect {
@@ -214,14 +214,14 @@ provision:
           bootstrap_expect = $BOOTSTRAP_EXPECT
 
           server_join {
-              retry_join = ["lima-$cluster-srv-01.internal"]
+              retry_join = ["lima-$cluster-srv-01.local"]
           }
           }
           datacenter = "$cluster"
 
           client {
           enabled = true
-          servers = ["lima-$cluster-srv-01.internal"]
+          servers = ["lima-$cluster-srv-01.local"]
           }
       EOF
 
@@ -253,7 +253,7 @@ provision:
 
           client {
             enabled = true
-            servers = ["lima-$cluster-srv-01.internal"]
+            servers = ["lima-$cluster-srv-01.local"]
           }
       EOF
           else
@@ -305,7 +305,7 @@ provision:
       nomad -autocomplete-install
       consul -autocomplete-install
 networks:
-  - lima: user-v2
+  - lima: shared
 vmType: qemu
 
 env:
