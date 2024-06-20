@@ -1,0 +1,174 @@
+images:
+  # Try to use a local image first.
+  - location: ~/artifacts/qemu/c-1.18-n-1.7/c-1.18-n-1.7.qcow2
+
+
+# disable port-mapping, mounts, containerd etc
+plain: false
+
+provision:
+  - mode: system # install Consul and Nomad Licenses if any
+    script: |
+      #!/bin/bash
+
+      if [[ -n $CONSUL_LICENSE ]]; then
+        echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+      fi
+
+      if [[ -n $NOMAD_LICENSE ]]; then
+        echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
+      fi
+
+  - mode:  system # Configure Consul common settings
+    script: |
+      #!/bin/bash
+
+      # common config for Server and Client
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "INFO"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-$CLUSTER-srv-01.local"]
+        datacenter = "$CLUSTER"
+
+        ui_config {
+          enabled = true
+        }
+      EOF
+
+  - mode: system # Configure Consul server settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/server.hcl
+        connect {
+          enabled = true
+        }
+
+        server = true
+        bootstrap_expect = $BOOTSTRAP_EXPECT
+      EOF
+      fi
+
+  - mode: system # Configure Consul client settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/client.hcl
+
+        recursors = ["1.1.1.1", "8.8.8.8"]
+
+        ports {
+          grpc = 8502
+        }
+      EOF
+      fi
+
+  - mode: system # Configure Nomad common settings
+    script: |
+      #!/bin/bash
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+        data_dir  = "/opt/nomad/data"
+        bind_addr = "0.0.0.0"
+        datacenter = "$CLUSTER"
+        log_level = "DEBUG"
+
+        advertise {
+          http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          rpc = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          serf = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        }
+      EOF
+
+  - mode: system # configure Nomad server settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/server.hcl
+        server {
+        #license_path = "/etc/nomad.d/license.hclic"
+        enabled = true
+        bootstrap_expect = $BOOTSTRAP_EXPECT
+
+          server_join {
+            retry_join = ["lima-$CLUSTER-srv-01.local"]
+          }
+        }
+      EOF
+      fi
+
+  - mode: system # configure Nomad client settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/client.hcl
+        client {
+          enabled = true
+          servers = ["lima-$CLUSTER-srv-01.local"]
+
+          network_interface = "lima0"
+        }
+        plugin "nomad-driver-exec2" {
+          config {
+            unveil_defaults = true
+            unveil_paths    = []
+            unveil_by_task  = true
+          }
+        }
+      EOF
+
+      ## Enable hashicorp-test repo & Install nomad-driver-exec2 as a part of scenario
+      package_name="nomad-driver-exec2"
+      repo_file="/etc/yum.repos.d/hashicorp.repo"
+
+      # Check if the repository file exists
+      if [ -f "$repo_file" ]; then
+          # Use sed to replace enabled=0 with enabled=1
+          sudo sed -i 's/enabled=0/enabled=1/g' "$repo_file"
+
+          # Check if the substitution was successful
+          if grep -q 'enabled=1' "$repo_file"; then
+              echo "Successfully updated 'enabled' parameter to 1 in $repo_file"
+          else
+              echo "Failed to update 'enabled' parameter in $repo_file"
+              exit 197
+          fi
+      else
+          echo "$repo_file not found. Please check if the repository file exists."
+          exit 198
+      fi
+      if ! rpm -q "$package_name" >/dev/null 2>&1; then
+      echo "$package_name is not installed. Proceeding with installation..."
+
+      # Install the package
+      dnf install -y "$package_name"
+
+      # Check if installation was successful
+      if rpm -q "$package_name" >/dev/null 2>&1; then
+          echo "$package_name has been successfully installed."
+      else
+          echo "Failed to install $package_name. Please check for errors."
+          exit 199
+      fi
+      else
+        echo "$package_name is already installed. Skipping installation."
+      fi    
+      fi
+
+  - mode:
+    script: |
+      systemctl enable --now docker
+      systemctl enable --now nomad consul
+  - mode: user
+    script: |
+      #!/bin/sh
+      nomad -autocomplete-install
+      consul -autocomplete-install
+networks:
+  - lima: shared
+vmType: qemu
