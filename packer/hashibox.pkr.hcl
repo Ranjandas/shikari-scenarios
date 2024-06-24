@@ -19,6 +19,12 @@ variable "nomad_version" {
   description = "Nomad version to install"
 }
 
+variable "vault_version" {
+  type        = string
+  default     = "1.17"
+  description = "Vault version to install"
+}
+
 variable "consul_cni_version" {
   type        = string
   default     = "1.5.0"
@@ -49,11 +55,11 @@ source "qemu" "hashibox" {
   disk_image       = true
 
   format       = "qcow2"
-  vm_name      = "c-${var.consul_version}-n-${var.nomad_version}.qcow2"
+  vm_name      = "c-${var.consul_version}-n-${var.nomad_version}-v-${var.nomad_version}.qcow2"
   boot_command = []
   net_device   = "virtio-net"
 
-  output_directory = ".artifacts/c-${var.consul_version}-n-${var.nomad_version}"
+  output_directory = ".artifacts/c-${var.consul_version}-n-${var.nomad_version}-v-${var.nomad_version}"
 
   qemu_binary  = "qemu-system-aarch64"
   accelerator  = "hvf"
@@ -89,6 +95,7 @@ build {
     environment_vars = [
       "CONSUL_VERSION=${var.consul_version}",
       "NOMAD_VERSION=${var.nomad_version}",
+      "VAULT_VERSION=${var.vault_version}",
       "CONSUL_CNI_VERSION=${var.consul_cni_version}"
     ]
     inline = [
@@ -103,7 +110,7 @@ build {
       "sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
 
       "sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/fedora/hashicorp.repo",
-      "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* containernetworking-plugins",
+      "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* vault-$VAULT_VERSION*  containernetworking-plugins",
 
       "sudo mkdir /opt/cni && sudo ln -s /usr/libexec/cni /opt/cni/bin",
 

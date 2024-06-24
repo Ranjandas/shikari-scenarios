@@ -1,0 +1,278 @@
+images:
+  # Try to use a local image first.
+  - location: ~/artifacts/qemu/c-1.18-n-1.7/c-1.18-n-1.7.qcow2
+
+mounts: []
+containerd:
+  system: false
+  user: false
+provision:
+  - mode: system # set license for vault
+    script: |
+      #!/bin/bash
+      echo VAULT_LICENSE=$VAULT_LICENSE > /etc/vault.d/vault.env
+
+  - mode: system # configure Vault
+    script: |
+      #!/bin/bash
+
+      function setConfig {
+          local mode=$1
+          local cluster=$2
+
+          # Set the config files accordingly 
+          if [[ $mode == "server" ]]; then
+          
+      HOSTNAME=$(hostname -s)
+
+      cat <<-EOF > /etc/vault.d/vault.hcl
+        api_addr = "http://${HOSTNAME}:8200"
+        cluster_addr = "http://${HOSTNAME}.local:8201"
+
+        ui = true
+        log_level="trace"
+
+        license_path = "/etc/vault.d/vault.license"
+
+        storage "raft" {
+            path = "/opt/vault"
+
+           $(for x in $(seq $BOOTSTRAP_EXPECT); do
+            echo retry_join {
+            echo  leader_api_addr = \"http://lima-${CLUSTER}-srv-0$x.local:8200\"
+            echo }
+            done)
+          }
+
+        listener "tcp" {
+        address       = "0.0.0.0:8200"
+        tls_disable   = "true"
+        cluster_address = "0.0.0.0:8201"
+        }
+      EOF
+         else
+            echo "Invalid mode for setConfig"
+          fi
+        }
+
+          # Check if the environment variable 'MODE' is set
+          if [[ -n $MODE ]]; then
+              echo "MODE is set to: $MODE"
+          else
+              echo "MODE is not set."
+          fi
+
+          # Check if the environment variable 'CLUSTER' is set
+          if [[ -n $CLUSTER ]]; then
+              echo "CLUSTER is set to: $CLUSTER"
+          else
+              echo "CLUSTER is not set."
+          fi
+
+          if [[ -n $VAULT_LICENSE ]]; then
+            echo "VAULT_LICENSE=$VAULT_LICENSE" > /etc/vault.d/vault.env
+          fi
+
+          setConfig $MODE $CLUSTER
+  - mode:
+    script: |
+      systemctl enable --now vault
+  - mode: user
+    script: |
+      #!/bin/sh
+      vault -autocomplete-install
+  
+  - mode: system # Unseal Vault
+    script: |
+      #!/bin/bash
+      export VAULT_ADDR=http://127.0.0.1:8200
+
+      # Set the hostname to unseal vault
+      if [[ "$HOSTNAME" == *"01"* ]]; then
+
+        # Wait for Vault to be available
+        until curl -s $VAULT_ADDR/v1/sys/health; do
+          echo "Waiting for Vault"
+          sleep 2
+        done
+        
+        # Initialize Vault
+        vault operator init -key-shares=1 -key-threshold=1 -format=json > ~/VaultCreds.json
+        sudo mv ~/VaultCreds.json /etc/vault.d/VaultCreds.json
+        sudo chown root:vault /etc/vault.d/VaultCreds.json
+        sudo chmod 0640 /etc/vault.d/VaultCreds.json
+        
+        # Extract the unseal key and root token
+        VAULT_UNSEAL_KEY=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .unseal_keys_b64[0])
+        VAULT_TOKEN=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .root_token)
+
+        # Set environment variables for future sessions
+        echo '' | sudo tee /etc/profile.d/vault.sh
+        echo 'export VAULT_ADDR="http://127.0.0.1:8200" ; export VAULT_UNSEAL_KEY=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .unseal_keys_b64[0]) ; export VAULT_RAFT_AUTOPILOT_DISABLE=true ; export VAULT_TOKEN=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .root_token)' | sudo tee /etc/profile.d/vault.sh
+
+        # Unseal the Vault
+        vault operator unseal ${VAULT_UNSEAL_KEY}
+
+        # Login to Vault and check raft status
+        vault login ${VAULT_TOKEN}
+        vault operator raft list-peers
+      fi
+  - mode: system # Create token for nomad
+    script: |
+      #!/bin/bash
+      export VAULT_ADDR=http://127.0.0.1:8200
+      
+
+  - mode: system # configure Consul
+    script: |
+      #!/bin/bash
+
+      function setConfig {
+          local mode=$1
+          local cluster=$2
+
+          # Set the config files accordingly 
+          if [[ $mode == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "INFO"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-$cluster-srv-01.local"]
+        datacenter = "$cluster"
+
+        ui_config {
+          enabled = true
+        }
+
+        connect {
+          enabled = true
+        }
+
+        server = true
+        bootstrap_expect = $BOOTSTRAP_EXPECT
+      EOF
+
+          elif [[ $mode == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "INFO"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-$cluster-srv-01.local"]
+        datacenter = "$cluster"
+
+        connect {
+          enabled = true
+        }
+        server = false
+      EOF
+          else
+            echo "Invalid mode for setConfig"
+          fi
+        }
+
+          # Check if the environment variable 'MODE' is set
+          if [[ -n $MODE ]]; then
+              echo "MODE is set to: $MODE"
+          else
+              echo "MODE is not set."
+          fi
+
+          # Check if the environment variable 'CLUSTER' is set
+          if [[ -n $CLUSTER ]]; then
+              echo "CLUSTER is set to: $CLUSTER"
+          else
+              echo "CLUSTER is not set."
+          fi
+
+          if [[ -n $CONSUL_LICENSE ]]; then
+            echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+          fi
+
+          setConfig $MODE $CLUSTER
+
+  - mode: system # configure Nomad
+    script: |
+      #!/bin/bash    
+      function setConfig {
+          local mode=$1
+          local cluster=$2
+
+          # Set the config files accordingly 
+          if [[ $mode == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+          data_dir  = "/opt/nomad/data"
+          bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+
+          advertise {
+          http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          rpc = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          serf = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          }
+
+          server {
+          #license_path = "/etc/nomad.d/license.hclic"
+          enabled = true
+          bootstrap_expect = $BOOTSTRAP_EXPECT
+          server_join {
+              retry_join = ["lima-$cluster-srv-01.local"]
+          }
+          }
+          datacenter = "$cluster"
+          vault {
+            enabled = true
+            address = "http://127.0.0.1:8200"
+          }
+      EOF
+
+          elif [[ $mode == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+          data_dir  = "/opt/nomad/data"
+          bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          datacenter = "$cluster"
+
+          client {
+          enabled = true
+          servers = ["lima-$cluster-srv-01.local"]
+          }
+      EOF
+          else
+              echo "Invalid mode for setConfig"
+          fi
+      }
+
+
+          # Check if the environment variable 'MODE' is set
+          if [[ -n $MODE ]]; then
+              echo "MODE is set to: $MODE"
+          else
+              echo "MODE is not set."
+          fi
+
+          # Check if the environment variable 'CLUSTER' is set
+          if [[ -n $CLUSTER ]]; then
+              echo "CLUSTER is set to: $CLUSTER"
+          else
+              echo "CLUSTER is not set."
+          fi
+
+          if [[ -n $NOMAD_LICENSE ]]; then
+            echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
+          fi
+
+          setConfig $MODE $CLUSTER
+  - mode:
+    script: |
+      systemctl enable --now docker
+      systemctl enable --now nomad consul
+  - mode: user
+    script: |
+      #!/bin/sh
+      nomad -autocomplete-install
+      consul -autocomplete-install
+  
+networks:
+  - lima: shared
+vmType: qemu
+
