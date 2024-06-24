@@ -118,6 +118,11 @@ build {
       # Set permissions for the certs directory
       "sudo chown consul:consul /etc/consul.d/certs",
       "sudo chown nomad:nomad /etc/nomad.d/certs",
+    
+      # Install exec2 driver and copy under /opt/nomad/data/plugins dir
+      "sudo dnf install -y nomad-driver-exec2 --enablerepo hashicorp-test",
+      "sudo mkdir /opt/nomad/data/plugins && sudo chown nomad:nomad /opt/nomad/data/plugins",
+      "sudo cp /usr/bin/nomad-driver-exec2 /opt/nomad/data/plugins/",
 
       # Enabling of the services is the responsibility of the instance provisioning scripts.
       "sudo systemctl disable docker consul nomad"
