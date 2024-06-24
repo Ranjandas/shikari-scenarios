@@ -2,11 +2,11 @@
 
 system_info:
   default_user:
-    name: fedora
+    name: shikari
 
 chpasswd:
   list: |
-    fedora:fedora
+    shikari:shikari
   expire: False
 ssh_pwauth: True
 resize_rootfs: True

@@ -7,6 +7,12 @@ packer {
   }
 }
 
+variable "arch" {
+  type        = string
+  default     = "aarch64"
+  description = "Architecture of the machine where you'd run the image"
+}
+
 variable "consul_version" {
   type        = string
   default     = "1.18"
@@ -31,26 +37,38 @@ variable "consul_cni_version" {
   description = "Consul CNI version to install"
 }
 
-variable "fedora_iso_url" {
-  type = string
+variable "source_image_url" {
+  type        = string
   default     = "https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/aarch64/images/Fedora-Cloud-Base-Generic.aarch64-40-1.14.qcow2"
   description = "Fedora Cloud Image URL - qcow2 format"
 }
 
-variable "fedora_iso_checksum" {
-  type = string
+variable "source_image_checksum" {
+  type        = string
   default     = "file:https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/aarch64/images/Fedora-Cloud-40-1.14-aarch64-CHECKSUM"
   description = "Checksum in the packer format of the cloud image"
 }
 
+locals {
+  qemu_binary       = "${var.arch == "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64"}"
+  accelerator       = "hvf"
+  cpu_model         = "${var.arch == "aarch64" ? "cortex-a57" : "qemu64"}"
+  machine_type      = "${var.arch == "aarch64" ? "virt" : "pc"}"
+  efi_boot          = "${var.arch == "aarch64" ? true : false}"
+  efi_firmware_code = "${var.arch == "aarch64" ? "/opt/homebrew/share/qemu/edk2-aarch64-code.fd" : ""}"
+  efi_firmware_vars = "${var.arch == "aarch64" ? "/opt/homebrew/share/qemu/edk2-arm-vars.fd" : ""}"
+
+  source_image_url = "${var.arch == "aarch64" ? var.source_image_url : replace(var.source_image_url, "aarch64", "x86_64")}"
+  source_image_checksum = "${var.arch == "aarch64" ? var.source_image_checksum : replace(var.source_image_checksum, "aarch64", "x86_64")}" 
+}
+
 source "qemu" "hashibox" {
-  iso_url      = "${var.fedora_iso_url}"
-  iso_checksum = "${var.fedora_iso_checksum}"
+  iso_url      = "${local.source_image_url}"
+  iso_checksum = "${local.source_image_checksum}"
 
   headless = true
 
   disk_compression = true
-  disk_size        = "5G"
   disk_interface   = "virtio"
   disk_image       = true
 
@@ -61,18 +79,16 @@ source "qemu" "hashibox" {
 
   output_directory = ".artifacts/c-${var.consul_version}-n-${var.nomad_version}-v-${var.nomad_version}"
 
-  qemu_binary  = "qemu-system-aarch64"
-  accelerator  = "hvf"
-  cpu_model    = "cortex-a57"
-  machine_type = "virt"
-
   cpus   = 8
   memory = 5120
 
-
-  efi_boot          = true
-  efi_firmware_code = "/opt/homebrew/share/qemu/edk2-aarch64-code.fd"
-  efi_firmware_vars = "/opt/homebrew/share/qemu/edk2-arm-vars.fd"
+  qemu_binary       = "${local.qemu_binary}"
+  accelerator       = "hvf"
+  cpu_model         = "${local.cpu_model}"
+  machine_type      = "${local.machine_type}"
+  efi_boot          = "${local.efi_boot}"
+  efi_firmware_code = "${local.efi_firmware_code}"
+  efi_firmware_vars = "${local.efi_firmware_vars}"
 
   qemuargs = [
     ["-cdrom", "userdata/cidata.iso"],
@@ -81,11 +97,11 @@ source "qemu" "hashibox" {
   ]
 
   communicator     = "ssh"
-  shutdown_command = "echo fedora | sudo -S shutdown -P now"
-  ssh_password     = "fedora"
-  ssh_username     = "fedora"
+  shutdown_command = "echo shikari | sudo -S shutdown -P now"
+  ssh_password     = "shikari"
+  ssh_username     = "shikari"
 
-  ssh_timeout      = "10m"
+  ssh_timeout = "10m"
 }
 
 build {
@@ -102,16 +118,23 @@ build {
       "sudo dnf clean all",
       "sudo dnf install -y unzip wget",
 
-      # For multicast DNS to use with socket_vmnet in Lima
-      "sudo dnf install -y crudini",
+      # For multicast DNS to use with socket_vmnet in Lima we use systemd-resolved. For rocky we have to install epel repo for Crudini.
+      "source /etc/os-release && [[ $ID != fedora ]] && sudo dnf install -y epel-release systemd-resolved && sudo systemctl enable --now systemd-resolved",
+      "sudo dnf install -y crudini $([ $(source /etc/os-release && echo $ID) != fedora ] && echo --enablerepo=epel)",
       "sudo mkdir /etc/systemd/resolved.conf.d/ && sudo crudini --ini-options=nospace --set /etc/systemd/resolved.conf.d/mdns.conf Resolve MulticastDNS yes",
 
-      "sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo",
+      # With systemd-resolved enabled, we should use the stub-resolver for mDNS to work.
+      "sudo rm /etc/resolv.conf && sudo ln -s /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf",
+
+      # Enable Docker repository and install Docker-CE
+      "sudo dnf config-manager --add-repo https://download.docker.com/linux/$([ $(source /etc/os-release && echo $ID) == fedora ] && echo fedora || echo rhel)/docker-ce.repo",
       "sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
 
-      "sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/fedora/hashicorp.repo",
-      "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* vault-$VAULT_VERSION*  containernetworking-plugins",
+      # Enable HashiCorp Repository and install the required packages including CNI libs
+      "sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/$([ $(source /etc/os-release && echo $ID) == fedora ] && echo fedora || echo RHEL)/hashicorp.repo",
+      "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* containernetworking-plugins",
 
+      # Nomad expects CNI binaries to be under /opt/cni/bin by default. We use symlink to avoid configuring alternate path in Nomad.
       "sudo mkdir /opt/cni && sudo ln -s /usr/libexec/cni /opt/cni/bin",
 
       # Consul CNI Binary, required for Nomad Transparent Proxy Support.

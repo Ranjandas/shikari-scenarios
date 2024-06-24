@@ -217,27 +217,17 @@ provision:
 
   - mode: system # acl bootstrap nomad
     script: |
-     #!/bin/sh
-     if [[ $MODE == "server" ]]; then
-     # Wait for nomad servers to come up and bootstrap nomad ACL
-      for i in {1..10}; do
-          # add sleep 5 secs
-          set +e
-          sleep 5
-          OUTPUT=$(echo "00000000-0000-0000-0000-000000000000"|nomad acl bootstrap - 2>&1)
-          # checks if the previous command (nomad acl bootstrap) failed (non-zero exit status).
-          if [ $? -ne 0 ]; then
-              echo "nomad acl bootstrap: $OUTPUT"
-              if [[ "$OUTPUT" = *"No cluster leader"* ]]; then
-                  echo "nomad has no cluster leader"
-                  continue
-              else
-                  echo "nomad already bootstrapped"
-                  exit 0
-              fi
-          fi
-          set -e
+      #!/bin/sh
+      if [[ $MODE == "server" ]]; then
+      # Set NOMAD_ADDR
+      export NOMAD_ADDR=http://127.0.0.1:4646
+      # Wait for nomad servers to come up and bootstrap nomad ACL
+      until curl -s ${NOMAD_ADDR}/v1/status/leader | grep 4647; do
+        echo "Waiting for Nomad to start"
+        sleep 2
       done
+      # Bootstrap nomad
+      echo "00000000-0000-0000-0000-000000000000"|nomad acl bootstrap - 2>&1
       fi
 
   - mode: system # setup workload identity
