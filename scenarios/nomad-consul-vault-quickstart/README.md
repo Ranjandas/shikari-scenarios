@@ -99,3 +99,9 @@ Node                                    Address                          State  
 7551b838-0ff4-8469-ae73-403535efdf54    lima-murphy-srv-02.local:8201    follower    true
 eb9642f8-0cf8-e7fc-1ca6-1604d07d20f3    lima-murphy-srv-03.local:8201    follower    true
 ```
+
+### Destroy
+
+```
+$ shikari destroy -f -n murphy
+```
