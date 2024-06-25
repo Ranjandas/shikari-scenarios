@@ -1,6 +1,6 @@
 # Scenario: Nomad Consul Quickstart
 
-This scenario deploys both Nomad and Consul with out any of the security configurations in place. This scenario is useful when you have to play around the features of Nomad (with or without Consul) and not worry about the security aspects.
+This scenario deploys both Nomad and Consul with out any of the security configurations in place. This scenario is useful when you have to play around the features of Nomad (with or without Consul) and not worry about the security aspects. This scenario also run environments which utilize Nomad's 1.8.x new exec2 driver, which is a successor of previous exec driver. The packer image has nomad-driver-exec2 driver baked in already, and placed under /opt/nomad/data/plugins directory for Nomad's consumption only when Nomad's version is 1.8.x or higher.
 
 ## Prerequsites
 
