@@ -7,21 +7,27 @@ containerd:
   system: false
   user: false
 provision:
-  - mode: system # set license for vault
-    script: |
-      #!/bin/bash
-      echo VAULT_LICENSE=$VAULT_LICENSE > /etc/vault.d/vault.env
-
-  - mode: system # configure Vault
+  - mode: system # Install Consul, Nomad and Vault Licenses if any
     script: |
       #!/bin/bash
 
-      function setConfig {
-          local mode=$1
-          local cluster=$2
+      if [[ -n $CONSUL_LICENSE ]]; then
+        echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+      fi
 
-          # Set the config files accordingly 
-          if [[ $mode == "server" ]]; then
+      if [[ -n $NOMAD_LICENSE ]]; then
+        echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
+      fi
+
+      if [[ -n VAULT_LICENSE ]]; then
+        echo "VAULT_LICENSE=$VAULT_LICENSE" > /etc/vault.d/vault.env
+      fi
+  
+  - mode: system # configure Vault Server settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "server" ]]; then
           
       HOSTNAME=$(hostname -s)
 
@@ -30,9 +36,7 @@ provision:
         cluster_addr = "http://${HOSTNAME}.local:8201"
 
         ui = true
-        log_level="trace"
-
-        license_path = "/etc/vault.d/vault.license"
+        log_level="debug"
 
         storage "raft" {
             path = "/opt/vault"
@@ -44,36 +48,16 @@ provision:
             done)
           }
 
+        license_path = "/etc/vault.d/vault.license"
+
         listener "tcp" {
         address       = "0.0.0.0:8200"
         tls_disable   = "true"
         cluster_address = "0.0.0.0:8201"
         }
       EOF
-         else
-            echo "Invalid mode for setConfig"
-          fi
-        }
+      fi
 
-          # Check if the environment variable 'MODE' is set
-          if [[ -n $MODE ]]; then
-              echo "MODE is set to: $MODE"
-          else
-              echo "MODE is not set."
-          fi
-
-          # Check if the environment variable 'CLUSTER' is set
-          if [[ -n $CLUSTER ]]; then
-              echo "CLUSTER is set to: $CLUSTER"
-          else
-              echo "CLUSTER is not set."
-          fi
-
-          if [[ -n $VAULT_LICENSE ]]; then
-            echo "VAULT_LICENSE=$VAULT_LICENSE" > /etc/vault.d/vault.env
-          fi
-
-          setConfig $MODE $CLUSTER
   - mode:
     script: |
       systemctl enable --now vault
@@ -115,36 +99,42 @@ provision:
 
         # Login to Vault and check raft status
         vault login ${VAULT_TOKEN}
+
+        for x in `seq 2 $BOOTSTRAP_EXPECT`; do
+          until [ $(curl -s http://lima-${CLUSTER}-srv-0$x.local:8200/v1/sys/health | jq -r '.initialized') = true ]; do 
+            echo "Waiting for Vault"
+            sleep 2
+          done
+          VAULT_ADDR="http://lima-${CLUSTER}-srv-0$x.local:8200" vault operator unseal $VAULT_UNSEAL_KEY
+        done
+
         vault operator raft list-peers
       fi
-  - mode: system # Create token for nomad
-    script: |
-      #!/bin/bash
-      export VAULT_ADDR=http://127.0.0.1:8200
-      
 
-  - mode: system # configure Consul
+  - mode:  system # Configure Consul Common Settings
     script: |
       #!/bin/bash
 
-      function setConfig {
-          local mode=$1
-          local cluster=$2
-
-          # Set the config files accordingly 
-          if [[ $mode == "server" ]]; then
+      # common config for Server and Client
       cat <<-EOF > /etc/consul.d/consul.hcl
         data_dir  = "/opt/consul/data"
-        log_level  = "INFO"
+        log_level  = "DEBUG"
         bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
         client_addr = "0.0.0.0"
-        retry_join = ["lima-$cluster-srv-01.local"]
-        datacenter = "$cluster"
+        retry_join = ["lima-$CLUSTER-srv-01.local"]
+        datacenter = "$CLUSTER"
 
         ui_config {
           enabled = true
         }
+      EOF
 
+  - mode: system # Configure Consul Server Settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/server.hcl
         connect {
           enabled = true
         }
@@ -152,116 +142,211 @@ provision:
         server = true
         bootstrap_expect = $BOOTSTRAP_EXPECT
       EOF
+      fi
 
-          elif [[ $mode == "client" ]]; then
-      cat <<-EOF > /etc/consul.d/consul.hcl
-        data_dir  = "/opt/consul/data"
-        log_level  = "INFO"
-        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
-        client_addr = "0.0.0.0"
-        retry_join = ["lima-$cluster-srv-01.local"]
-        datacenter = "$cluster"
-
-        connect {
-          enabled = true
-        }
-        server = false
-      EOF
-          else
-            echo "Invalid mode for setConfig"
-          fi
-        }
-
-          # Check if the environment variable 'MODE' is set
-          if [[ -n $MODE ]]; then
-              echo "MODE is set to: $MODE"
-          else
-              echo "MODE is not set."
-          fi
-
-          # Check if the environment variable 'CLUSTER' is set
-          if [[ -n $CLUSTER ]]; then
-              echo "CLUSTER is set to: $CLUSTER"
-          else
-              echo "CLUSTER is not set."
-          fi
-
-          if [[ -n $CONSUL_LICENSE ]]; then
-            echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
-          fi
-
-          setConfig $MODE $CLUSTER
-
-  - mode: system # configure Nomad
+  - mode: system # Configure Consul Client Settings
     script: |
-      #!/bin/bash    
-      function setConfig {
-          local mode=$1
-          local cluster=$2
+      #!/bin/bash
 
-          # Set the config files accordingly 
-          if [[ $mode == "server" ]]; then
+      if [[ $MODE == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/client.hcl
+
+        recursors = ["1.1.1.1", "8.8.8.8"]
+
+        ports {
+          grpc = 8502
+        }
+      EOF
+      fi
+
+  - mode: system # Configure Nomad Common Settings
+    script: |
+      #!/bin/bash
       cat <<-EOF > /etc/nomad.d/nomad.hcl
-          data_dir  = "/opt/nomad/data"
-          bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        data_dir  = "/opt/nomad/data"
+        bind_addr = "0.0.0.0"
+        datacenter = "$CLUSTER"
+        log_level = "DEBUG"
 
-          advertise {
+        advertise {
           http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
           rpc = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
           serf = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
-          }
+        }
+      EOF
+  
+  - mode: system # configure Nomad Server Settings
+    script: |
+      #!/bin/bash
 
-          server {
-          #license_path = "/etc/nomad.d/license.hclic"
-          enabled = true
-          bootstrap_expect = $BOOTSTRAP_EXPECT
+      if [[ $MODE == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/server.hcl
+        server {
+        #license_path = "/etc/nomad.d/license.hclic"
+        enabled = true
+        bootstrap_expect = $BOOTSTRAP_EXPECT
+
           server_join {
-              retry_join = ["lima-$cluster-srv-01.local"]
+            retry_join = ["lima-$CLUSTER-srv-01.local"]
           }
-          }
-          datacenter = "$cluster"
-          vault {
-            enabled = true
-            address = "http://127.0.0.1:8200"
-          }
+        }
       EOF
+      fi
 
-          elif [[ $mode == "client" ]]; then
-      cat <<-EOF > /etc/nomad.d/nomad.hcl
-          data_dir  = "/opt/nomad/data"
-          bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
-          datacenter = "$cluster"
+  - mode: system # configure Nomad Client Settings
+    script: |
+      #!/bin/bash
 
-          client {
+      if [[ $MODE == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/client.hcl
+        client {
           enabled = true
-          servers = ["lima-$cluster-srv-01.local"]
-          }
+          servers = ["lima-$CLUSTER-srv-01.local"]
+
+          network_interface = "lima0"
+        }
       EOF
-          else
-              echo "Invalid mode for setConfig"
-          fi
-      }
+      fi
+      
+  # - mode: system # configure Consul
+  #   script: |
+  #     #!/bin/bash
+
+  #     function setConfig {
+  #         local mode=$1
+  #         local cluster=$2
+
+  #         # Set the config files accordingly 
+  #         if [[ $mode == "server" ]]; then
+  #     cat <<-EOF > /etc/consul.d/consul.hcl
+  #       data_dir  = "/opt/consul/data"
+  #       log_level  = "INFO"
+  #       bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+  #       client_addr = "0.0.0.0"
+  #       retry_join = ["lima-$cluster-srv-01.local"]
+  #       datacenter = "$cluster"
+
+  #       ui_config {
+  #         enabled = true
+  #       }
+
+  #       connect {
+  #         enabled = true
+  #       }
+
+  #       server = true
+  #       bootstrap_expect = $BOOTSTRAP_EXPECT
+  #     EOF
+
+  #         elif [[ $mode == "client" ]]; then
+  #     cat <<-EOF > /etc/consul.d/consul.hcl
+  #       data_dir  = "/opt/consul/data"
+  #       log_level  = "INFO"
+  #       bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+  #       client_addr = "0.0.0.0"
+  #       retry_join = ["lima-$cluster-srv-01.local"]
+  #       datacenter = "$cluster"
+
+  #       connect {
+  #         enabled = true
+  #       }
+  #       server = false
+  #     EOF
+  #         else
+  #           echo "Invalid mode for setConfig"
+  #         fi
+  #       }
+
+  #         # Check if the environment variable 'MODE' is set
+  #         if [[ -n $MODE ]]; then
+  #             echo "MODE is set to: $MODE"
+  #         else
+  #             echo "MODE is not set."
+  #         fi
+
+  #         # Check if the environment variable 'CLUSTER' is set
+  #         if [[ -n $CLUSTER ]]; then
+  #             echo "CLUSTER is set to: $CLUSTER"
+  #         else
+  #             echo "CLUSTER is not set."
+  #         fi
+
+  #         if [[ -n $CONSUL_LICENSE ]]; then
+  #           echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+  #         fi
+
+  #         setConfig $MODE $CLUSTER
+
+  # - mode: system # configure Nomad
+  #   script: |
+  #     #!/bin/bash    
+  #     function setConfig {
+  #         local mode=$1
+  #         local cluster=$2
+
+  #         # Set the config files accordingly 
+  #         if [[ $mode == "server" ]]; then
+  #     cat <<-EOF > /etc/nomad.d/nomad.hcl
+  #         data_dir  = "/opt/nomad/data"
+  #         bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+
+  #         advertise {
+  #         http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+  #         rpc = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+  #         serf = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+  #         }
+
+  #         server {
+  #         #license_path = "/etc/nomad.d/license.hclic"
+  #         enabled = true
+  #         bootstrap_expect = $BOOTSTRAP_EXPECT
+  #         server_join {
+  #             retry_join = ["lima-$cluster-srv-01.local"]
+  #         }
+  #         }
+  #         datacenter = "$cluster"
+  #         vault {
+  #           enabled = true
+  #           address = "http://127.0.0.1:8200"
+  #         }
+  #     EOF
+
+  #         elif [[ $mode == "client" ]]; then
+  #     cat <<-EOF > /etc/nomad.d/nomad.hcl
+  #         data_dir  = "/opt/nomad/data"
+  #         bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+  #         datacenter = "$cluster"
+
+  #         client {
+  #         enabled = true
+  #         servers = ["lima-$cluster-srv-01.local"]
+  #         }
+  #     EOF
+  #         else
+  #             echo "Invalid mode for setConfig"
+  #         fi
+  #     }
 
 
-          # Check if the environment variable 'MODE' is set
-          if [[ -n $MODE ]]; then
-              echo "MODE is set to: $MODE"
-          else
-              echo "MODE is not set."
-          fi
+  #         # Check if the environment variable 'MODE' is set
+  #         if [[ -n $MODE ]]; then
+  #             echo "MODE is set to: $MODE"
+  #         else
+  #             echo "MODE is not set."
+  #         fi
 
-          # Check if the environment variable 'CLUSTER' is set
-          if [[ -n $CLUSTER ]]; then
-              echo "CLUSTER is set to: $CLUSTER"
-          else
-              echo "CLUSTER is not set."
-          fi
+  #         # Check if the environment variable 'CLUSTER' is set
+  #         if [[ -n $CLUSTER ]]; then
+  #             echo "CLUSTER is set to: $CLUSTER"
+  #         else
+  #             echo "CLUSTER is not set."
+  #         fi
 
-          if [[ -n $NOMAD_LICENSE ]]; then
-            echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
-          fi
+  #         if [[ -n $NOMAD_LICENSE ]]; then
+  #           echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
+  #         fi
 
-          setConfig $MODE $CLUSTER
+  #         setConfig $MODE $CLUSTER
   - mode:
     script: |
       systemctl enable --now docker
