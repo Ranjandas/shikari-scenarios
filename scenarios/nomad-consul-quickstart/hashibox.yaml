@@ -7,123 +7,139 @@ images:
 plain: true
 
 provision:
-  - mode: system # install Consul and Nomad Licenses if any
-    script: |
-      #!/bin/bash
+- mode: system # install Consul and Nomad Licenses if any
+  script: |
+    #!/bin/bash
+    if [[ -n $CONSUL_LICENSE ]]; then
+    echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+    fi
+    if [[ -n $NOMAD_LICENSE ]]; then
+    echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
+    fi
 
-      if [[ -n $CONSUL_LICENSE ]]; then
-        echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
-      fi
+- mode:  system # Configure Consul common settings
+  script: |
+    #!/bin/bash
+    # common config for Server and Client
+    cat <<-EOF > /etc/consul.d/consul.hcl
+    data_dir  = "/opt/consul/data"
+    log_level  = "INFO"
+    bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+    client_addr = "0.0.0.0"
+    retry_join = ["lima-$CLUSTER-srv-01.local"]
+    datacenter = "$CLUSTER"
 
-      if [[ -n $NOMAD_LICENSE ]]; then
-        echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
-      fi
+    ui_config {
+    enabled = true
+    }
+    EOF
+- mode: system # Configure Consul server settings
+  script: |
+    #!/bin/bash
+    if [[ $MODE == "server" ]]; then
+    cat <<-EOF > /etc/consul.d/server.hcl
+    connect {
+    enabled = true
+    }
+    server = true
+    bootstrap_expect = $BOOTSTRAP_EXPECT
+    EOF
+    fi
+- mode: system # Configure Consul client settings
+  script: |
+    #!/bin/bash
+    if [[ $MODE == "client" ]]; then
+    cat <<-EOF > /etc/consul.d/client.hcl
+    recursors = ["1.1.1.1", "8.8.8.8"]
+    ports {
+    grpc = 8502
+    }
+    EOF
+    fi
+- mode: system # Configure Nomad common settings
+  script: |
+    #!/bin/bash
+    cat <<-EOF > /etc/nomad.d/nomad.hcl
+    data_dir  = "/opt/nomad/data"
+    bind_addr = "0.0.0.0"
+    datacenter = "$CLUSTER"
+    log_level = "DEBUG"
+    advertise {
+    http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+    rpc = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+    serf = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+    }
+    EOF
 
-  - mode:  system # Configure Consul common settings
-    script: |
-      #!/bin/bash
-
-      # common config for Server and Client
-      cat <<-EOF > /etc/consul.d/consul.hcl
-        data_dir  = "/opt/consul/data"
-        log_level  = "INFO"
-        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
-        client_addr = "0.0.0.0"
+- mode: system # configure Nomad server settings
+  script: |
+    #!/bin/bash
+    if [[ $MODE == "server" ]]; then
+    cat <<-EOF > /etc/nomad.d/server.hcl
+    server {
+    #license_path = "/etc/nomad.d/license.hclic"
+    enabled = true
+    bootstrap_expect = $BOOTSTRAP_EXPECT
+      server_join {
         retry_join = ["lima-$CLUSTER-srv-01.local"]
-        datacenter = "$CLUSTER"
+      }
+    }
+    EOF
+    fi
 
-        ui_config {
-          enabled = true
-        }
-      EOF
+- mode: system # configure Nomad client settings
+  script: |
+    #!/bin/bash
+    if [[ $MODE == "client" ]]; then
+    cat <<-EOF > /etc/nomad.d/client.hcl
+    client {
+    enabled = true
+    servers = ["lima-$CLUSTER-srv-01.local"]
+    network_interface = "lima0"
+    }
+    EOF
+    fi 
+    # Get Nomad version
+    nomad_version=$(nomad --version | sed -n 's/^Nomad v\([0-9]\+\.[0-9]\+\).*/\1/p')
+    nomad_required_version="1.8"
+    if awk 'BEGIN { exit !('"${nomad_version}"' >= '"${nomad_required_version}"') }'; then
+    # Check if Nomad version is 1.8 or higher
+    echo "Nomad version $nomad_version is equal or higher than 1.8. Pushing config for nomad-driver-exec2..."
+    cat <<-EOF > /etc/nomad.d/exec2.hcl
+    plugin "nomad-driver-exec2" {
+    config {
+    unveil_defaults = true
+    unveil_paths    = []
+    unveil_by_task  = true
+      }
+    }
+    EOF
+    fi
+    package_name="nomad-driver-exec2"
+    existing_package_location="/usr/bin"
+  
+    # Check if the directory exists
+    if [ ! -d "$NOMAD_PLUGINSDIR" ]; then
+    mkdir -p "$NOMAD_PLUGINSDIR"
+    fi
+  
+    # Check if the plugin exists.
+    if rpm -q "$package_name" >/dev/null 2>&1; then
+    cp "$existing_package_location/$package_name" "$NOMAD_PLUGINSDIR"
+    fi
 
-  - mode: system # Configure Consul server settings
-    script: |
-      #!/bin/bash
-
-      if [[ $MODE == "server" ]]; then
-      cat <<-EOF > /etc/consul.d/server.hcl
-        connect {
-          enabled = true
-        }
-
-        server = true
-        bootstrap_expect = $BOOTSTRAP_EXPECT
-      EOF
-      fi
-
-  - mode: system # Configure Consul client settings
-    script: |
-      #!/bin/bash
-
-      if [[ $MODE == "client" ]]; then
-      cat <<-EOF > /etc/consul.d/client.hcl
-
-        recursors = ["1.1.1.1", "8.8.8.8"]
-
-        ports {
-          grpc = 8502
-        }
-      EOF
-      fi
-
-  - mode: system # Configure Nomad common settings
-    script: |
-      #!/bin/bash
-      cat <<-EOF > /etc/nomad.d/nomad.hcl
-        data_dir  = "/opt/nomad/data"
-        bind_addr = "0.0.0.0"
-        datacenter = "$CLUSTER"
-        log_level = "DEBUG"
-
-        advertise {
-          http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
-          rpc = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
-          serf = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
-        }
-      EOF
-
-  - mode: system # configure Nomad server settings
-    script: |
-      #!/bin/bash
-
-      if [[ $MODE == "server" ]]; then
-      cat <<-EOF > /etc/nomad.d/server.hcl
-        server {
-        #license_path = "/etc/nomad.d/license.hclic"
-        enabled = true
-        bootstrap_expect = $BOOTSTRAP_EXPECT
-
-          server_join {
-            retry_join = ["lima-$CLUSTER-srv-01.local"]
-          }
-        }
-      EOF
-      fi
-
-  - mode: system # configure Nomad client settings
-    script: |
-      #!/bin/bash
-
-      if [[ $MODE == "client" ]]; then
-      cat <<-EOF > /etc/nomad.d/client.hcl
-        client {
-          enabled = true
-          servers = ["lima-$CLUSTER-srv-01.local"]
-
-          network_interface = "lima0"
-        }
-      EOF
-      fi
-  - mode:
-    script: |
-      systemctl enable --now docker
-      systemctl enable --now nomad consul
-  - mode: user
-    script: |
-      #!/bin/sh
-      nomad -autocomplete-install
-      consul -autocomplete-install
+- mode:
+  script: |
+    systemctl enable --now docker
+    systemctl enable --now nomad consul
+- mode: user
+  script: |
+    #!/bin/sh
+    nomad -autocomplete-install
+    consul -autocomplete-install
 networks:
   - lima: shared
 vmType: qemu
+
+env:
+  NOMAD_PLUGINSDIR: /opt/nomad/data/plugins
