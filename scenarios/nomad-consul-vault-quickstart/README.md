@@ -70,7 +70,7 @@ lima-murphy-srv-01.global  192.168.105.4  4648  alive   true    3             1.
 lima-murphy-srv-02.global  192.168.105.5  4648  alive   false   3             1.7.7  murphy      global
 lima-murphy-srv-03.global  192.168.105.3  4648  alive   false   3             1.7.7  murphy      global
 
-limactl shell secure-srv-01
+limactl shell murphy-srv-01
 
 $ vault status
 Key                     Value
@@ -95,7 +95,7 @@ Raft Applied Index      65
 $ vault operator raft list-peers
 Node                                    Address                          State       Voter
 ----                                    -------                          -----       -----
-0b0fd88a-aa25-c4dd-e25c-fe7c4413fa9e    lima-secure-srv-01.local:8201    leader      true
-7551b838-0ff4-8469-ae73-403535efdf54    lima-secure-srv-02.local:8201    follower    true
-eb9642f8-0cf8-e7fc-1ca6-1604d07d20f3    lima-secure-srv-03.local:8201    follower    true
+0b0fd88a-aa25-c4dd-e25c-fe7c4413fa9e    lima-murphy-srv-01.local:8201    leader      true
+7551b838-0ff4-8469-ae73-403535efdf54    lima-murphy-srv-02.local:8201    follower    true
+eb9642f8-0cf8-e7fc-1ca6-1604d07d20f3    lima-murphy-srv-03.local:8201    follower    true
 ```
