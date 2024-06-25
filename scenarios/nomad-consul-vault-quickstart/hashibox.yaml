@@ -1,6 +1,6 @@
 images:
   # Try to use a local image first.
-  - location: ~/artifacts/qemu/c-1.18-n-1.7/c-1.18-n-1.7.qcow2
+  - location: ~/artifacts/qemu/c-1.18-n-1.7-v-1.17/c-1.18-n-1.7-v-1.17.qcow2
 
 mounts: []
 containerd:
