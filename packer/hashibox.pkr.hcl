@@ -73,11 +73,11 @@ source "qemu" "hashibox" {
   disk_image       = true
 
   format       = "qcow2"
-  vm_name      = "c-${var.consul_version}-n-${var.nomad_version}-v-${var.nomad_version}.qcow2"
+  vm_name      = "c-${var.consul_version}-n-${var.nomad_version}-v-${var.vault_version}.qcow2"
   boot_command = []
   net_device   = "virtio-net"
 
-  output_directory = ".artifacts/c-${var.consul_version}-n-${var.nomad_version}-v-${var.nomad_version}"
+  output_directory = ".artifacts/c-${var.consul_version}-n-${var.nomad_version}-v-${var.vault_version}"
 
   cpus   = 8
   memory = 5120
