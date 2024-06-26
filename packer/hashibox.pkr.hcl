@@ -52,7 +52,7 @@ variable "source_image_checksum" {
 locals {
   qemu_binary       = "${var.arch == "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64"}"
   accelerator       = "hvf"
-  cpu_model         = "${var.arch == "aarch64" ? "cortex-a57" : "qemu64"}"
+  cpu_model         = "${var.arch == "aarch64" ? "cortex-a57" : "host"}"
   machine_type      = "${var.arch == "aarch64" ? "virt" : "pc"}"
   efi_boot          = "${var.arch == "aarch64" ? true : false}"
   efi_firmware_code = "${var.arch == "aarch64" ? "/opt/homebrew/share/qemu/edk2-aarch64-code.fd" : ""}"
