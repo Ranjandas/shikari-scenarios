@@ -138,6 +138,11 @@ build {
       "sudo mkdir /etc/consul.d/certs && cd /etc/consul.d/certs ; sudo consul tls ca create",
       "sudo mkdir /etc/nomad.d/certs && cd /etc/nomad.d/certs ; sudo nomad tls ca create",
 
+      # Install exec2 driver and copy under /opt/nomad/data/plugins dir
+      "sudo dnf install -y nomad-driver-exec2 --enablerepo hashicorp-test",
+      "sudo mkdir /opt/nomad/data/plugins && sudo chown nomad:nomad /opt/nomad/data/plugins",
+      "sudo cp /usr/bin/nomad-driver-exec2 /opt/nomad/data/plugins/",
+
       # Set permissions for the certs directory
       "sudo chown consul:consul /etc/consul.d/certs",
       "sudo chown nomad:nomad /etc/nomad.d/certs",
