@@ -190,6 +190,10 @@ provision:
             retry_join = ["lima-$CLUSTER-srv-01.local"]
           }
         }
+        vault {
+            enabled = true
+            address = "http://127.0.0.1:8200"
+         }
       EOF
       fi
 
