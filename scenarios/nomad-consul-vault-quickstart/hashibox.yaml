@@ -56,13 +56,9 @@ provision:
       EOF
       fi
 
-  - mode:
+  - mode:      # required to run unseal vault
     script: |
       systemctl enable --now vault
-  - mode: user
-    script: |
-      #!/bin/sh
-      vault -autocomplete-install
   
   - mode: system # Unseal Vault
     script: |
@@ -70,7 +66,7 @@ provision:
       export VAULT_ADDR=http://127.0.0.1:8200
 
       # Set the hostname to unseal vault
-      if [[ "$HOSTNAME" == *srv-01"* ]]; then
+      if [[ "$HOSTNAME" == *"srv-01"* ]]; then
 
         # Wait for Vault to be available
         until curl -s $VAULT_ADDR/v1/sys/health; do
@@ -217,6 +213,7 @@ provision:
       #!/bin/sh
       nomad -autocomplete-install
       consul -autocomplete-install
+      vault -autocomplete-install
   
 networks:
   - lima: shared
