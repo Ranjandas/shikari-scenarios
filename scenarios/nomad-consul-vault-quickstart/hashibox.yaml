@@ -2,10 +2,8 @@ images:
   # Try to use a local image first.
   - location: ~/artifacts/qemu/c-1.18-n-1.7-v-1.17/c-1.18-n-1.7-v-1.17.qcow2
 
-mounts: []
-containerd:
-  system: false
-  user: false
+plain: true
+
 provision:
   - mode: system # Install Consul, Nomad and Vault Licenses if any
     script: |
@@ -19,7 +17,7 @@ provision:
         echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
       fi
 
-      if [[ -n VAULT_LICENSE ]]; then
+      if [[ -n $VAULT_LICENSE ]]; then
         echo "VAULT_LICENSE=$VAULT_LICENSE" > /etc/vault.d/vault.env
       fi
   
@@ -72,7 +70,7 @@ provision:
       export VAULT_ADDR=http://127.0.0.1:8200
 
       # Set the hostname to unseal vault
-      if [[ "$HOSTNAME" == *"01"* ]]; then
+      if [[ "$HOSTNAME" == *srv-01"* ]]; then
 
         # Wait for Vault to be available
         until curl -s $VAULT_ADDR/v1/sys/health; do
@@ -107,8 +105,6 @@ provision:
           done
           VAULT_ADDR="http://lima-${CLUSTER}-srv-0$x.local:8200" vault operator unseal $VAULT_UNSEAL_KEY
         done
-
-        vault operator raft list-peers
       fi
 
   - mode:  system # Configure Consul Common Settings
