@@ -197,6 +197,42 @@ provision:
         }
       EOF
       fi
+
+  - mode: system # configure Nomad exec2 driver
+    script: |
+      #!/bin/bash
+
+      # Get Nomad version
+      nomad_version=$(nomad --version | sed -n 's/^Nomad v\([0-9]\+\.[0-9]\+\).*/\1/p')
+      nomad_required_version="1.8"
+
+      if awk 'BEGIN { exit !('"${nomad_version}"' >= '"${nomad_required_version}"') }' && [[ $MODE == "client" ]]; then
+      # Check if Nomad version is 1.8 or higher
+      cat <<-EOF > /etc/nomad.d/exec2.hcl
+      plugin "nomad-driver-exec2" {
+        config {
+          unveil_defaults = true
+          unveil_paths    = []
+          unveil_by_task  = true
+        }
+      }
+      EOF
+
+        package_name="nomad-driver-exec2"
+        existing_package_location="/usr/bin"
+        nomad_pluginsdir=/opt/nomad/data/plugins
+
+        # Check if the directory exists
+        if [ ! -d "$nomad_pluginsdir" ]; then
+          mkdir -p "$nomad_pluginsdir"
+        fi
+
+        # Check if the plugin exists.
+        if rpm -q "$package_name" >/dev/null 2>&1; then
+          cp "$existing_package_location/$package_name" "$nomad_pluginsdir"
+        fi
+      fi
+
   - mode: system
     script: |
       systemctl enable --now docker
