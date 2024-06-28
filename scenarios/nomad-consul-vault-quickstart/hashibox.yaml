@@ -1,0 +1,221 @@
+images:
+  # Try to use a local image first.
+  - location: ~/artifacts/qemu/c-1.18-n-1.7-v-1.17/c-1.18-n-1.7-v-1.17.qcow2
+
+plain: true
+
+provision:
+  - mode: system # Install Consul, Nomad and Vault Licenses if any
+    script: |
+      #!/bin/bash
+
+      if [[ -n $CONSUL_LICENSE ]]; then
+        echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+      fi
+
+      if [[ -n $NOMAD_LICENSE ]]; then
+        echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
+      fi
+
+      if [[ -n $VAULT_LICENSE ]]; then
+        echo "VAULT_LICENSE=$VAULT_LICENSE" > /etc/vault.d/vault.env
+      fi
+  
+  - mode: system # configure Vault Server settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "server" ]]; then
+          
+      HOSTNAME=$(hostname -s)
+
+      cat <<-EOF > /etc/vault.d/vault.hcl
+        api_addr = "http://${HOSTNAME}:8200"
+        cluster_addr = "http://${HOSTNAME}.local:8201"
+
+        ui = true
+        log_level="debug"
+
+        storage "raft" {
+            path = "/opt/vault"
+
+           $(for x in $(seq $BOOTSTRAP_EXPECT); do
+            echo retry_join {
+            echo  leader_api_addr = \"http://lima-${CLUSTER}-srv-0$x.local:8200\"
+            echo }
+            done)
+          }
+
+        license_path = "/etc/vault.d/vault.license"
+
+        listener "tcp" {
+        address       = "0.0.0.0:8200"
+        tls_disable   = "true"
+        cluster_address = "0.0.0.0:8201"
+        }
+      EOF
+      fi
+
+  - mode:      # required to run unseal vault
+    script: |
+      systemctl enable --now vault
+  
+  - mode: system # Unseal Vault
+    script: |
+      #!/bin/bash
+      export VAULT_ADDR=http://127.0.0.1:8200
+
+      # Set the hostname to unseal vault
+      if [[ "$HOSTNAME" == *"srv-01"* ]]; then
+
+        # Wait for Vault to be available
+        until curl -s $VAULT_ADDR/v1/sys/health; do
+          echo "Waiting for Vault"
+          sleep 2
+        done
+        
+        # Initialize Vault
+        vault operator init -key-shares=1 -key-threshold=1 -format=json > ~/VaultCreds.json
+        sudo mv ~/VaultCreds.json /etc/vault.d/VaultCreds.json
+        sudo chown root:vault /etc/vault.d/VaultCreds.json
+        sudo chmod 0640 /etc/vault.d/VaultCreds.json
+        
+        # Extract the unseal key and root token
+        VAULT_UNSEAL_KEY=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .unseal_keys_b64[0])
+        VAULT_TOKEN=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .root_token)
+
+        # Set environment variables for future sessions
+        echo '' | sudo tee /etc/profile.d/vault.sh
+        echo 'export VAULT_ADDR="http://127.0.0.1:8200" ; export VAULT_UNSEAL_KEY=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .unseal_keys_b64[0]) ; export VAULT_RAFT_AUTOPILOT_DISABLE=true ; export VAULT_TOKEN=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .root_token)' | sudo tee /etc/profile.d/vault.sh
+
+        # Unseal the Vault
+        vault operator unseal ${VAULT_UNSEAL_KEY}
+
+        # Login to Vault and check raft status
+        vault login ${VAULT_TOKEN}
+
+        for x in `seq 2 $BOOTSTRAP_EXPECT`; do
+          until [ $(curl -s http://lima-${CLUSTER}-srv-0$x.local:8200/v1/sys/health | jq -r '.initialized') = true ]; do 
+            echo "Waiting for Vault"
+            sleep 2
+          done
+          VAULT_ADDR="http://lima-${CLUSTER}-srv-0$x.local:8200" vault operator unseal $VAULT_UNSEAL_KEY
+        done
+      fi
+
+  - mode:  system # Configure Consul Common Settings
+    script: |
+      #!/bin/bash
+
+      # common config for Server and Client
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "DEBUG"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-$CLUSTER-srv-01.local"]
+        datacenter = "$CLUSTER"
+
+        ui_config {
+          enabled = true
+        }
+      EOF
+
+  - mode: system # Configure Consul Server Settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/server.hcl
+        connect {
+          enabled = true
+        }
+
+        server = true
+        bootstrap_expect = $BOOTSTRAP_EXPECT
+      EOF
+      fi
+
+  - mode: system # Configure Consul Client Settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/client.hcl
+
+        recursors = ["1.1.1.1", "8.8.8.8"]
+
+        ports {
+          grpc = 8502
+        }
+      EOF
+      fi
+
+  - mode: system # Configure Nomad Common Settings
+    script: |
+      #!/bin/bash
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+        data_dir  = "/opt/nomad/data"
+        bind_addr = "0.0.0.0"
+        datacenter = "$CLUSTER"
+        log_level = "DEBUG"
+
+        advertise {
+          http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          rpc = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          serf = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        }
+      EOF
+  
+  - mode: system # configure Nomad Server Settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/server.hcl
+        server {
+        #license_path = "/etc/nomad.d/license.hclic"
+        enabled = true
+        bootstrap_expect = $BOOTSTRAP_EXPECT
+
+          server_join {
+            retry_join = ["lima-$CLUSTER-srv-01.local"]
+          }
+        }
+        vault {
+            enabled = true
+            address = "http://127.0.0.1:8200"
+         }
+      EOF
+      fi
+
+  - mode: system # configure Nomad Client Settings
+    script: |
+      #!/bin/bash
+
+      if [[ $MODE == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/client.hcl
+        client {
+          enabled = true
+          servers = ["lima-$CLUSTER-srv-01.local"]
+
+          network_interface = "lima0"
+        }
+      EOF
+      fi
+      
+  - mode:
+    script: |
+      systemctl enable --now docker
+      systemctl enable --now nomad consul
+  - mode: user
+    script: |
+      #!/bin/sh
+      nomad -autocomplete-install
+      consul -autocomplete-install
+      vault -autocomplete-install
+  
+networks:
+  - lima: shared
+vmType: qemu
+
