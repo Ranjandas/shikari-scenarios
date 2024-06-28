@@ -38,15 +38,15 @@ provision:
     script: |
       #!/bin/bash
 
-      if [[ $MODE == "server" ]]; then
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
       cat <<-EOF > /etc/nomad.d/server.hcl
         server {
         #license_path = "/etc/nomad.d/license.hclic"
         enabled = true
-        bootstrap_expect = $BOOTSTRAP_EXPECT
+        bootstrap_expect = ${SHIKARI_SERVER_COUNT}
 
           server_join {
-            retry_join = ["lima-$CLUSTER-srv-01.local"]
+            retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
           }
         }
       EOF
@@ -56,11 +56,11 @@ provision:
     script: |
       #!/bin/bash
 
-      if [[ $MODE == "client" ]]; then
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
       cat <<-EOF > /etc/nomad.d/client.hcl
         client {
           enabled = true
-          servers = ["lima-$CLUSTER-srv-01.local"]
+          servers = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
         }
       EOF
       fi

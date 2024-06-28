@@ -40,7 +40,7 @@ provision:
         }
 
         server = true
-        bootstrap_expect = $BOOTSTRAP_EXPECT
+        bootstrap_expect = ${SHIKARI_SERVER_COUNT}
         
         # required for transparent proxy
         recursors   = ["1.1.1.1", "1.1.0.0"]
@@ -99,21 +99,21 @@ provision:
           fi
         }
 
-          # Check if the environment variable 'MODE' is set
-          if [[ -n $MODE ]]; then
-              echo "MODE is set to: $MODE"
+          # Check if the environment variable '{SHIKARI_VM_MODE}' is set
+          if [[ -n ${SHIKARI_VM_MODE} ]]; then
+              echo "{SHIKARI_VM_MODE} is set to: ${SHIKARI_VM_MODE}"
           else
-              echo "MODE is not set."
+              echo "{SHIKARI_VM_MODE} is not set."
           fi
 
-          # Check if the environment variable 'CLUSTER' is set
-          if [[ -n $CLUSTER ]]; then
-              echo "CLUSTER is set to: $CLUSTER"
+          # Check if the environment variable '{SHIKARI_CLUSTER_NAME}' is set
+          if [[ -n ${SHIKARI_CLUSTER_NAME} ]]; then
+              echo "{SHIKARI_CLUSTER_NAME} is set to: ${SHIKARI_CLUSTER_NAME}"
           else
-              echo "CLUSTER is not set."
+              echo "{SHIKARI_CLUSTER_NAME} is not set."
           fi
 
-          setConfig $MODE $CLUSTER
+          setConfig ${SHIKARI_VM_MODE} ${SHIKARI_CLUSTER_NAME}
 
   - mode: system # configure Nomad
     script: |
@@ -130,7 +130,7 @@ provision:
 
           server {
           enabled = true
-          bootstrap_expect = $BOOTSTRAP_EXPECT
+          bootstrap_expect = ${SHIKARI_SERVER_COUNT}
 
           server_join {
               retry_join = ["lima-$cluster-srv-01.internal"]
@@ -190,21 +190,21 @@ provision:
       }
 
 
-          # Check if the environment variable 'MODE' is set
-          if [[ -n $MODE ]]; then
-              echo "MODE is set to: $MODE"
+          # Check if the environment variable '{SHIKARI_VM_MODE}' is set
+          if [[ -n ${SHIKARI_VM_MODE} ]]; then
+              echo "{SHIKARI_VM_MODE} is set to: ${SHIKARI_VM_MODE}"
           else
-              echo "MODE is not set."
+              echo "{SHIKARI_VM_MODE} is not set."
           fi
 
-          # Check if the environment variable 'CLUSTER' is set
-          if [[ -n $CLUSTER ]]; then
-              echo "CLUSTER is set to: $CLUSTER"
+          # Check if the environment variable '{SHIKARI_CLUSTER_NAME}' is set
+          if [[ -n ${SHIKARI_CLUSTER_NAME} ]]; then
+              echo "{SHIKARI_CLUSTER_NAME} is set to: ${SHIKARI_CLUSTER_NAME}"
           else
-              echo "CLUSTER is not set."
+              echo "{SHIKARI_CLUSTER_NAME} is not set."
           fi
 
-          setConfig $MODE $CLUSTER
+          setConfig ${SHIKARI_VM_MODE} ${SHIKARI_CLUSTER_NAME}
   - mode:
     script: |
       systemctl enable --now docker
@@ -218,7 +218,7 @@ provision:
   - mode: system # acl bootstrap nomad
     script: |
       #!/bin/sh
-      if [[ $MODE == "server" ]]; then
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
       # Set NOMAD_ADDR
       export NOMAD_ADDR=http://127.0.0.1:4646
       # Wait for nomad servers to come up and bootstrap nomad ACL

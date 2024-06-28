@@ -28,8 +28,8 @@ provision:
         log_level  = "DEBUG"
         bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
         client_addr = "0.0.0.0"
-        retry_join = ["lima-$CLUSTER-srv-01.local"]
-        datacenter = "$CLUSTER"
+        retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+        datacenter = "${SHIKARI_CLUSTER_NAME}"
 
         ui_config {
           enabled = true
@@ -54,7 +54,7 @@ provision:
       ## Generate Consul Server Certificates
 
       cd /etc/consul.d/certs
-      consul tls cert create -$MODE -dc $CLUSTER -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local')
+      consul tls cert create -${SHIKARI_VM_MODE} -dc ${SHIKARI_CLUSTER_NAME} -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local')
       chown consul:consul /etc/consul.d/certs/*
       chmod 644 /etc/consul.d/certs/*
 
@@ -62,8 +62,8 @@ provision:
         tls {
           defaults {
             ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
-            cert_file = "/etc/consul.d/certs/$CLUSTER-$MODE-consul-0.pem"
-            key_file = "/etc/consul.d/certs/$CLUSTER-$MODE-consul-0-key.pem"
+            cert_file = "/etc/consul.d/certs/${SHIKARI_CLUSTER_NAME}-${SHIKARI_VM_MODE}-consul-0.pem"
+            key_file = "/etc/consul.d/certs/${SHIKARI_CLUSTER_NAME}-${SHIKARI_VM_MODE}-consul-0-key.pem"
             verify_server_hostname = true
             verify_incoming = true
             verify_outgoing = true
@@ -81,14 +81,14 @@ provision:
     script: |
       #!/bin/bash
 
-      if [[ $MODE == "server" ]]; then
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
       cat <<-EOF > /etc/consul.d/server.hcl
         connect {
           enabled = true
         }
 
         server = true
-        bootstrap_expect = $BOOTSTRAP_EXPECT
+        bootstrap_expect = ${SHIKARI_SERVER_COUNT}
       EOF
 
       cat <<-EOF > /etc/consul.d/ports.hcl
@@ -103,7 +103,7 @@ provision:
     script: |
       #!/bin/bash
 
-      if [[ $MODE == "client" ]]; then
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
       cat <<-EOF > /etc/consul.d/client.hcl
         ports {
           grpc = 8502
@@ -121,7 +121,7 @@ provision:
       cat <<-EOF > /etc/nomad.d/nomad.hcl
         data_dir  = "/opt/nomad/data"
         bind_addr = "0.0.0.0"
-        datacenter = "$CLUSTER"
+        datacenter = "${SHIKARI_CLUSTER_NAME}"
         log_level = "DEBUG"
 
         advertise {
@@ -140,7 +140,7 @@ provision:
       ## Generate TLS Certificates
 
       cd /etc/nomad.d/certs
-      nomad tls cert create -$MODE -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local')
+      nomad tls cert create -${SHIKARI_VM_MODE} -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local')
 
       cat <<-EOF > /etc/nomad.d/tls.hcl
       tls {
@@ -148,8 +148,8 @@ provision:
         rpc = true
 
         ca_file = "/etc/nomad.d/certs/nomad-agent-ca.pem"
-        cert_file = "/etc/nomad.d/certs/global-$MODE-nomad.pem"
-        key_file = "/etc/nomad.d/certs/global-$MODE-nomad-key.pem"
+        cert_file = "/etc/nomad.d/certs/global-${SHIKARI_VM_MODE}-nomad.pem"
+        key_file = "/etc/nomad.d/certs/global-${SHIKARI_VM_MODE}-nomad-key.pem"
 
         verify_server_hostname = true
       }
@@ -169,15 +169,15 @@ provision:
     script: |
       #!/bin/bash
 
-      if [[ $MODE == "server" ]]; then
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
       cat <<-EOF > /etc/nomad.d/server.hcl
         server {
         #license_path = "/etc/nomad.d/license.hclic"
         enabled = true
-        bootstrap_expect = $BOOTSTRAP_EXPECT
+        bootstrap_expect = ${SHIKARI_SERVER_COUNT}
 
           server_join {
-            retry_join = ["lima-$CLUSTER-srv-01.local"]
+            retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
           }
         }
       EOF
@@ -187,11 +187,11 @@ provision:
     script: |
       #!/bin/bash
 
-      if [[ $MODE == "client" ]]; then
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
       cat <<-EOF > /etc/nomad.d/client.hcl
         client {
           enabled = true
-          servers = ["lima-$CLUSTER-srv-01.local"]
+          servers = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
 
           network_interface = "lima0"
         }
@@ -206,7 +206,7 @@ provision:
       nomad_version=$(nomad --version | sed -n 's/^Nomad v\([0-9]\+\.[0-9]\+\).*/\1/p')
       nomad_required_version="1.8"
 
-      if awk 'BEGIN { exit !('"${nomad_version}"' >= '"${nomad_required_version}"') }' && [[ $MODE == "client" ]]; then
+      if awk 'BEGIN { exit !('"${nomad_version}"' >= '"${nomad_required_version}"') }' && [[ ${SHIKARI_VM_MODE} == "client" ]]; then
       # Check if Nomad version is 1.8 or higher
       cat <<-EOF > /etc/nomad.d/exec2.hcl
       plugin "nomad-driver-exec2" {
@@ -278,7 +278,7 @@ provision:
         sleep 1
       done
 
-      agent_token=$(consul acl token create -node-identity $(hostname):$CLUSTER -format json | jq -r '.SecretID')
+      agent_token=$(consul acl token create -node-identity $(hostname):${SHIKARI_CLUSTER_NAME} -format json | jq -r '.SecretID')
       consul acl set-agent-token agent $agent_token
 
 
