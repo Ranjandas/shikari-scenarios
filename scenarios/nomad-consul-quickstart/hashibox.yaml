@@ -29,8 +29,8 @@ provision:
         log_level  = "INFO"
         bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
         client_addr = "0.0.0.0"
-        retry_join = ["lima-$CLUSTER-srv-01.local"]
-        datacenter = "$CLUSTER"
+        retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+        datacenter = "${SHIKARI_CLUSTER_NAME}"
 
         ui_config {
           enabled = true
@@ -41,14 +41,14 @@ provision:
     script: |
       #!/bin/bash
 
-      if [[ $MODE == "server" ]]; then
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
       cat <<-EOF > /etc/consul.d/server.hcl
         connect {
           enabled = true
         }
 
         server = true
-        bootstrap_expect = $BOOTSTRAP_EXPECT
+        bootstrap_expect = $SHIKARI_SERVER_COUNT
       EOF
       fi
 
@@ -56,7 +56,7 @@ provision:
     script: |
       #!/bin/bash
 
-      if [[ $MODE == "client" ]]; then
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
       cat <<-EOF > /etc/consul.d/client.hcl
 
         recursors = ["1.1.1.1", "8.8.8.8"]
@@ -73,7 +73,7 @@ provision:
       cat <<-EOF > /etc/nomad.d/nomad.hcl
         data_dir  = "/opt/nomad/data"
         bind_addr = "0.0.0.0"
-        datacenter = "$CLUSTER"
+        datacenter = "${SHIKARI_CLUSTER_NAME}"
         log_level = "DEBUG"
 
         advertise {
@@ -87,15 +87,15 @@ provision:
     script: |
       #!/bin/bash
 
-      if [[ $MODE == "server" ]]; then
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
       cat <<-EOF > /etc/nomad.d/server.hcl
         server {
         #license_path = "/etc/nomad.d/license.hclic"
         enabled = true
-        bootstrap_expect = $BOOTSTRAP_EXPECT
+        bootstrap_expect = $SHIKARI_SERVER_COUNT
 
           server_join {
-            retry_join = ["lima-$CLUSTER-srv-01.local"]
+            retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
           }
         }
       EOF
@@ -105,11 +105,11 @@ provision:
     script: |
       #!/bin/bash
 
-      if [[ $MODE == "client" ]]; then
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
       cat <<-EOF > /etc/nomad.d/client.hcl
         client {
           enabled = true
-          servers = ["lima-$CLUSTER-srv-01.local"]
+          servers = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
 
           network_interface = "lima0"
         }
@@ -124,7 +124,7 @@ provision:
       nomad_version=$(nomad --version | sed -n 's/^Nomad v\([0-9]\+\.[0-9]\+\).*/\1/p')
       nomad_required_version="1.8"
 
-      if awk 'BEGIN { exit !('"${nomad_version}"' >= '"${nomad_required_version}"') }' && [[ $MODE == "client" ]]; then
+      if awk 'BEGIN { exit !('"${nomad_version}"' >= '"${nomad_required_version}"') }' && [[ ${SHIKARI_VM_MODE} == "client" ]]; then
       # Check if Nomad version is 1.8 or higher
       cat <<-EOF > /etc/nomad.d/exec2.hcl
       plugin "nomad-driver-exec2" {
