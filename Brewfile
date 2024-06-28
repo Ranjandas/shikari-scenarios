@@ -1,4 +1,7 @@
 tap "hashicorp/tap"
+tap "ranjandas/shikari"
+
+brew "ranjandas/shikari/shikari"
 
 brew "hashicorp/tap/packer"
 brew "hashicorp/tap/nomad"
