@@ -15,15 +15,16 @@ You can use the Brewfile shipped in this repository to install all the dependent
 ```
 $ brew bundle
 Using hashicorp/tap
-==> Downloading https://formulae.brew.sh/api/formula.jws.json
-
+Tapping ranjandas/shikari
+Installing ranjandas/shikari/shikari
 Using hashicorp/tap/packer
 Using hashicorp/tap/nomad
 Using hashicorp/tap/consul
 Using cdrtools
+Using qemu
 Using lima
 Using socket_vmnet
-Homebrew Bundle complete! 7 Brewfile dependencies now installed.
+Homebrew Bundle complete! 10 Brewfile dependencies now installed.
 ```
 
 ### Setup Socket_vmnet
