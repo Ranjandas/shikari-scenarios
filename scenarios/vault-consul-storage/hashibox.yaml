@@ -1,0 +1,270 @@
+plain: true
+provision:
+  - mode: system # Install Vault and Consul license
+    script: |
+      #!/bin/bash
+ 
+      if [[ -n $CONSUL_LICENSE ]]; then
+        echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+      fi
+
+      if [[ -n $VAULT_LICENSE ]]; then
+        echo "VAULT_LICENSE=$VAULT_LICENSE" > /etc/vault.d/vault.env
+      fi
+
+  - mode: system # Configure Consul common settings
+    script: |
+      #!/bin/bash
+
+      # common config for Server and Client
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "DEBUG"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+        datacenter = "${SHIKARI_CLUSTER_NAME}"
+
+        ui_config {
+          enabled = true
+        }
+      EOF
+
+      cat <<-EOF > /etc/consul.d/acl.hcl
+        acl {
+          enabled = true
+          default_policy = "deny"
+          down_policy = "extend-cache"
+          
+          enable_token_persistence = true
+
+          tokens {
+            initial_management = "root"
+          }
+        }
+      EOF
+
+
+      ## Generate Consul Server Certificates
+
+      cd /etc/consul.d/certs
+      consul tls cert create -${SHIKARI_VM_MODE} -dc ${SHIKARI_CLUSTER_NAME} -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local')
+      chown consul:consul /etc/consul.d/certs/*
+      chmod 644 /etc/consul.d/certs/*
+
+      cat <<-EOF > /etc/consul.d/tls.hcl
+        tls {
+          defaults {
+            ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
+            cert_file = "/etc/consul.d/certs/${SHIKARI_CLUSTER_NAME}-${SHIKARI_VM_MODE}-consul-0.pem"
+            key_file = "/etc/consul.d/certs/${SHIKARI_CLUSTER_NAME}-${SHIKARI_VM_MODE}-consul-0-key.pem"
+            verify_server_hostname = true
+            verify_incoming = true
+            verify_outgoing = true
+          }
+          grpc {
+            verify_incoming = false
+          }
+          https {
+            verify_incoming = false
+          }
+        }
+      EOF
+
+  - mode: system # Configure Consul server settings
+    script: |
+      #!/bin/bash
+
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/server.hcl
+        connect {
+          enabled = true
+        }
+
+        server = true
+        bootstrap_expect = ${SHIKARI_SERVER_COUNT}
+      EOF
+
+      cat <<-EOF > /etc/consul.d/ports.hcl
+      ports {
+        https = 8501
+      }
+      EOF
+
+      fi
+
+  - mode: system # Configure Consul client settings
+    script: |
+      #!/bin/bash
+
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/client.hcl
+        ports {
+          grpc = 8502
+          grpc_tls = 8503
+          https = 8501
+        }
+
+        recursors = ["1.1.1.1", "8.8.8.8"]
+      EOF
+      fi
+
+  - mode: system # Start Consul
+    script: |
+      systemctl enable --now consul
+
+  - mode: system # Create Vault Token for Consul
+    script: |
+      #!/bin/bash
+      
+      export CONSUL_HTTP_ADDR=https://localhost:8501
+      export CONSUL_CACERT=/etc/consul.d/certs/consul-agent-ca.pem
+      export CONSUL_HTTP_TOKEN=root
+
+      until curl -s -k ${CONSUL_HTTP_ADDR}/v1/status/leader | grep 8300; do
+        echo "Waiting for Consul to start"
+        sleep 1
+      done
+
+      until ! curl -s -H "x-consul-token: root" 0:8500/v1/acl/tokens | grep "ACL system must be bootstrapped"; do
+        echo "Waiting for ACL to be bootstrapped"
+        sleep 1
+      done
+
+      if echo $HOSTNAME | grep srv-01$ > /dev/null 2>&1; then
+        vault_policy='agent_prefix "" { policy = "read" } key_prefix "vault/" { policy = "write" } service "vault" { policy = "write" } session_prefix "" { policy = "write" }'
+
+        echo $vault_policy | consul acl policy create -name vault-policy -rules=-
+        consul acl token create -secret=11111111-1111-1111-1111-111111111111 --policy-name vault-policy
+      fi
+
+
+  # \   \ /   /  _  \ |    |   \    | \__    ___/ #
+  #  \   Y   /  /_\  \|    |   /    |   |    |    #
+  #   \     /    |    \    |  /|    |___|    |    #
+  #    \___/\____|__  /______/ |_______ \____|    #
+
+  - mode: system # generate certificates
+    script: |
+      #!/bin/bash
+
+      # avoid running the script on restarts
+      if [[ -f /shikari-bootstrapped ]] then
+        exit 0
+      fi
+
+      cd /opt/vault/tls
+
+      cp /etc/consul.d/certs/* .
+
+      consul tls cert create -server -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local') -additional-dnsname ${HOSTNAME}.local
+
+      chown vault:vault /opt/vault/tls/*
+
+  - mode: system # configure Vault Server
+    script: |
+      #!/bin/bash
+
+      # avoid running the script on restarts
+      if [[ -f /shikari-bootstrapped ]] then
+        exit 0
+      fi
+
+      HOSTNAME=$(hostname -s)
+
+      cat <<-EOF > /etc/vault.d/vault.hcl
+      api_addr     = "https://${HOSTNAME}.local:8200"
+      cluster_addr = "https://${HOSTNAME}.local:8201"
+      
+      ui = true
+      log_level="trace"
+
+      storage "consul" {
+        address = "localhost:8501"
+        token   = "11111111-1111-1111-1111-111111111111"
+        scheme = "https"
+        tls_ca_file = "/opt/vault/tls/consul-agent-ca.pem"
+      }
+
+      listener "tcp" {
+        address       = "0.0.0.0:8200"
+        
+        tls_cert_file       = "/opt/vault/tls/dc1-server-consul-0.pem"
+        tls_key_file        = "/opt/vault/tls/dc1-server-consul-0-key.pem"
+        tls_client_ca_file  = "/opt/vault/tls/consul-agent-ca.pem"
+        
+        cluster_address = "0.0.0.0:8201"
+      }
+      
+      # this will disable perf standby even if the license allows
+      #disable_performance_standby = true
+      EOF
+
+      # Use nomad to format the config file if it exists
+      command -v nomad &>/dev/null && nomad fmt /etc/vault.d/vault.hcl
+
+  - mode: system  # start and enable Vault
+    script: |
+      systemctl enable --now vault
+
+  - mode: system  # init and unseal Vault
+    script: |
+      #!/usr/bin/env bash
+
+      # avoid running the script on restarts
+
+      if [[ -f /shikari-bootstrapped ]] then
+        exit 0
+      fi
+
+      export VAULT_ADDR=https://127.0.0.1:8200
+      export VAULT_CACERT=/opt/vault/tls/consul-agent-ca.pem
+      
+      if [[ "$HOSTNAME" == *"01"* ]]; then
+        
+        until curl -s --cacert /opt/vault/tls/consul-agent-ca.pem $VAULT_ADDR/v1/sys/health; do
+          echo "Waiting for Vault"
+        done
+
+        vault operator init -key-shares=1 -key-threshold=1 -format=json > ~/VaultCreds.json
+        
+        sudo mv ~/VaultCreds.json /etc/vault.d/VaultCreds.json
+        sudo chown root:vault /etc/vault.d/VaultCreds.json
+        sudo chmod 0640 /etc/vault.d/VaultCreds.json
+        
+        VAULT_UNSEAL_KEY=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .unseal_keys_b64[0])
+        VAULT_TOKEN=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .root_token)
+        
+        echo export VAULT_ADDR="https://127.0.0.1:8200" | sudo tee -a /etc/profile.d/vault.sh
+        echo export VAULT_CACERT=$VAULT_CACERT | sudo tee -a /etc/profile.d/vault.sh
+        echo export VAULT_UNSEAL_KEY=$VAULT_UNSEAL_KEY | sudo tee -a /etc/profile.d/vault.sh 
+        echo export VAULT_TOKEN=$VAULT_TOKEN | sudo tee -a /etc/profile.d/vault.sh      
+
+        # Unseal Vault      
+        vault operator unseal ${VAULT_UNSEAL_KEY}
+
+        vault login ${VAULT_TOKEN}
+
+        # execute the following in a subshell to not overwrite VAULT_ADDR
+        (
+          if [[ $SHIKARI_SERVER_COUNT > 1 ]]; then
+            for x in `seq 2 $SHIKARI_SERVER_COUNT`; do
+
+              VAULT_ADDR="https://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200"
+
+              until [ "$(curl -s --cacert $VAULT_CACERT $VAULT_ADDR/v1/sys/health | jq -r '.initialized')" = "true" ]; do
+                echo "Waiting for Vault"
+                sleep 2
+              done
+
+              vault operator unseal $VAULT_UNSEAL_KEY
+            done
+          fi
+        )
+      fi
+
+      touch /shikari-bootstrapped
+
+networks:
+  - lima: shared
+vmType: qemu
