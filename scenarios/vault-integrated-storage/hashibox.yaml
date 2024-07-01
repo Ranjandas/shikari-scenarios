@@ -37,7 +37,7 @@ provision:
       HOSTNAME=$(hostname -s)
 
       cat <<-EOF > /etc/vault.d/vault.hcl
-      api_addr     = "https://${HOSTNAME}:8200"
+      api_addr     = "https://${HOSTNAME}.local:8200"
       cluster_addr = "https://${HOSTNAME}.local:8201"
       
       ui = true
