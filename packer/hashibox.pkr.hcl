@@ -25,6 +25,12 @@ variable "nomad_version" {
   description = "Nomad version to install"
 }
 
+variable "vault_version" {
+  type        = string
+  default     = "1.17"
+  description = "Vault version to install"
+}
+
 variable "consul_cni_version" {
   type        = string
   default     = "1.5.0"
@@ -67,11 +73,11 @@ source "qemu" "hashibox" {
   disk_image       = true
 
   format       = "qcow2"
-  vm_name      = "c-${var.consul_version}-n-${var.nomad_version}.qcow2"
+  vm_name      = "c-${var.consul_version}-n-${var.nomad_version}-v-${var.vault_version}.qcow2"
   boot_command = []
   net_device   = "virtio-net"
 
-  output_directory = ".artifacts/c-${var.consul_version}-n-${var.nomad_version}"
+  output_directory = ".artifacts/c-${var.consul_version}-n-${var.nomad_version}-v-${var.vault_version}"
 
   cpus   = 8
   memory = 5120
@@ -105,6 +111,7 @@ build {
     environment_vars = [
       "CONSUL_VERSION=${var.consul_version}",
       "NOMAD_VERSION=${var.nomad_version}",
+      "VAULT_VERSION=${var.vault_version}",
       "CONSUL_CNI_VERSION=${var.consul_cni_version}"
     ]
     inline = [
@@ -125,7 +132,7 @@ build {
 
       # Enable HashiCorp Repository and install the required packages including CNI libs
       "sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/$([ $(source /etc/os-release && echo $ID) == fedora ] && echo fedora || echo RHEL)/hashicorp.repo",
-      "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* containernetworking-plugins",
+      "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* vault-$VAULT_VERSION* containernetworking-plugins",
 
       # Nomad expects CNI binaries to be under /opt/cni/bin by default. We use symlink to avoid configuring alternate path in Nomad.
       "sudo mkdir /opt/cni && sudo ln -s /usr/libexec/cni /opt/cni/bin",
