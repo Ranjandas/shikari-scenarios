@@ -268,3 +268,5 @@ provision:
 networks:
   - lima: shared
 vmType: qemu
+env:
+  SHIKARI_SCENARIO_NAME: "vault-consul-storage"
