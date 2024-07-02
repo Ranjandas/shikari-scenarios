@@ -95,6 +95,9 @@ provision:
       curl -sfL https://get.k3s.io | K3S_TOKEN=${K3S_TOKEN} INSTALL_K3S_EXEC="${K3S_MODE} --node-taint=${K3S_NODE_TAINT} --flannel-iface=lima0 --node-ip ${LIMA_IP} ${K3S_URL_ARG} ${K3S_CLUSTER_INIT_ARG} ${K3S_KUBECONFIG_MODE_ARG}" sh -
     fi
 
+    # Set the cluster server URL to the lima0 interface IP so that it can be copied to host and access the cluster.
+    kubectl config set-cluster default --server=https://$LIMA_IP:6443
+
 networks:
   - lima: shared
 env:
