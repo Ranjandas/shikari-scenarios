@@ -1,0 +1,101 @@
+# Deploy kubernetes via k3s (which installs a bundled containerd).
+# $ limactl start ./k3s.yaml
+# $ limactl shell k3s kubectl
+#
+# It can be accessed from the host by exporting the kubeconfig file;
+# the ports are already forwarded automatically by lima:
+#
+# $ export KUBECONFIG=$(limactl list k3s --format 'unix://{{.Dir}}/copied-from-guest/kubeconfig.yaml')
+# $ kubectl get no
+# NAME       STATUS   ROLES                  AGE   VERSION
+# lima-k3s   Ready    control-plane,master   69s   v1.21.1+k3s1
+#
+# This template requires Lima v0.7.0 or later.
+
+images:
+# Try to use release-yyyyMMdd image if available. Note that release-yyyyMMdd will be removed after several months.
+- location: "https://cloud-images.ubuntu.com/releases/24.04/release-20240423/ubuntu-24.04-server-cloudimg-amd64.img"
+  arch: "x86_64"
+  digest: "sha256:32a9d30d18803da72f5936cf2b7b9efcb4d0bb63c67933f17e3bdfd1751de3f3"
+- location: "https://cloud-images.ubuntu.com/releases/24.04/release-20240423/ubuntu-24.04-server-cloudimg-arm64.img"
+  arch: "aarch64"
+  digest: "sha256:c841bac00925d3e6892d979798103a867931f255f28fefd9d5e07e3e22d0ef22"
+# Fallback to the latest release image.
+# Hint: run `limactl prune` to invalidate the cache
+- location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+  arch: "x86_64"
+- location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+  arch: "aarch64"
+
+plain: true
+
+provision:
+- mode: system # Setup systemd-resolved for name resolution using mDNS
+  script: |
+    #!/bin/sh
+
+    sed -i 's/^#MulticastDNS.*/MulticastDNS=yes/g' /etc/systemd/resolved.conf
+    systemctl restart systemd-resolved
+
+    mkdir /etc/systemd/network/10-netplan-lima0.network.d/
+    
+    cat <<-EOF > /etc/systemd/network/10-netplan-lima0.network.d/override.conf
+    [Network]
+    MulticastDNS=yes
+    EOF
+
+    systemctl restart systemd-networkd
+
+- mode: system # Install and configure K3S
+  script: |
+    #!/bin/sh
+
+    # Populate the LIMA_IP variable with the IP Address. We have to retry this because of the systemd-networkd restart above.
+    until ! [ -z $LIMA_IP ]; do LIMA_IP=$(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local'); sleep 1; done
+
+    K3S_MODE=agent
+    K3S_FLANNEL_ARG=""
+    K3S_KUBECONFIG_MODE_ARG=""
+    K3S_NODE_TAINT=""
+
+    # Server and Agent have different arguments to be passed. We compute them based on the VM Mode.
+    if [ "${SHIKARI_VM_MODE}" = "server" ]; then
+      K3S_MODE=server
+      K3S_FLANNEL_ARG="--flannel-backend=host-gw"
+      K3S_KUBECONFIG_MODE_ARG="--write-kubeconfig-mode 644"
+      K3S_NODE_TAINT=node-role.kubernetes.io/control-plane=effect:NoSchedule
+    fi 
+
+
+    # Cluster init arg is only required when running HA
+    K3S_CLUSTER_INIT_ARG=""
+
+    # This is required for all the servers to join the first seed server.
+    K3S_URL_ARG="--server https://lima-${SHIKARI_CLUSTER_NAME}-srv-01.local:6443"
+   
+    if [ $(hostname -s) = "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]; then
+      # Set this to empty on the first server
+      K3S_URL_ARG=""
+
+      if [ "${SHIKARI_SERVER_COUNT}" > 1 ]; then
+        K3S_CLUSTER_INIT_ARG="--cluster-init"
+      fi
+    fi
+
+    if [ "${SHIKARI_CLIENT_COUNT}" = 0 ]; then
+      # If there are no client VMs, let us not taint the servers so that pods can run on them.
+      K3S_NODE_TAINT=""
+    fi
+
+    # We compute the TOKEN using uuid5 to generate consistent token
+    # ref: https://developer.hashicorp.com/packer/docs/templates/hcl_templates/functions/uuid/uuidv5
+    K3S_TOKEN=$(uuidgen --namespace @oid --name k3s --sha1)
+
+    if [ ! -d /var/lib/rancher/k3s ]; then
+      curl -sfL https://get.k3s.io | K3S_TOKEN=${K3S_TOKEN} INSTALL_K3S_EXEC="${K3S_MODE} --node-taint=${K3S_NODE_TAINT} --flannel-iface=lima0 --node-ip ${LIMA_IP} ${K3S_URL_ARG} ${K3S_CLUSTER_INIT_ARG} ${K3S_KUBECONFIG_MODE_ARG}" sh -
+    fi
+
+networks:
+  - lima: shared
+env:
+  SHIKARI_SCENARIO_NAME: "k3s-multinode"
