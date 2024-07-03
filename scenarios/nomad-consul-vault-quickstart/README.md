@@ -8,7 +8,9 @@ The following tools are required to run these scenarios:
 - Requires a base VM image built using packer (../../packer/hashibox.pkr.hcl)
 - Uses qemu driver (you can use vz by modifying vmType in the template)
 - The vault config uses raft as storage.
-- Requires Packer build using Consul and Nomad binaries, may need to update the [variables.pkvars.hcl] file incase there's a need to change versions than default.
+- Requires Packer build using Consul, Nomad and Vault binaries, may need to update the [variables.pkvars.hcl] file incase there's a need to change versions than default.
+- Update the vault.job.hcl to the correct shikari cluster name for datacenters block
+- Setting a Vault token in the agent configuration is deprecated and will be removed in Nomad 1.9. Migrate your Vault configuration to use workload identity.
 
 ## Usage
 
@@ -47,7 +49,7 @@ murphy        murphy-srv-03       Running       100            4                
 You can export the required environment variables to access both Nomad and Consul
 
 ```
-$ eval $(shikari env -n murphy)
+$ eval $(shikari env -n murphy consul)
 
 $ consul members
 Node                Address              Status  Type    Build   Protocol  DC      Partition  Segment
@@ -58,6 +60,9 @@ lima-murphy-cli-01  192.168.105.10:8301  alive   client  1.18.2  2         murph
 lima-murphy-cli-02  192.168.105.14:8301  alive   client  1.18.2  2         murphy  default    <default>
 lima-murphy-cli-03  192.168.105.9:8301   alive   client  1.18.2  2         murphy  default    <default>
 
+
+$ eval $(shikari env -n murphy nomad)
+
 $ nomad node status
 ID        Node Pool  DC      Name                Class   Drain  Eligibility  Status
 94665b9b  default    murphy  lima-murphy-cli-01  <none>  false  eligible     ready
@@ -66,11 +71,12 @@ ID        Node Pool  DC      Name                Class   Drain  Eligibility  Sta
 
 $ nomad server members
 Name                       Address        Port  Status  Leader  Raft Version  Build  Datacenter  Region
-lima-murphy-srv-01.global  192.168.105.4  4648  alive   true    3             1.7.7  murphy      global
-lima-murphy-srv-02.global  192.168.105.5  4648  alive   false   3             1.7.7  murphy      global
-lima-murphy-srv-03.global  192.168.105.3  4648  alive   false   3             1.7.7  murphy      global
+lima-murphy-srv-01.global  192.168.105.4  4648  alive   true    3             1.8.1  murphy      global
+lima-murphy-srv-02.global  192.168.105.5  4648  alive   false   3             1.8.1  murphy      global
+lima-murphy-srv-03.global  192.168.105.3  4648  alive   false   3             1.8.1  murphy      global
 
-limactl shell murphy-srv-01
+$ eval $(shikari env -n murphy vault)
+$ eval $(shikari exec -n murphy -i srv-01 env | grep VAULT_TOKEN)
 
 $ vault status
 Key                     Value
@@ -92,12 +98,23 @@ Active Since            2024-06-25T12:51:40.639035402+10:00
 Raft Committed Index    65
 Raft Applied Index      65
 
-$ vault operator raft list-peers
-Node                                    Address                          State       Voter
-----                                    -------                          -----       -----
-0b0fd88a-aa25-c4dd-e25c-fe7c4413fa9e    lima-murphy-srv-01.local:8201    leader      true
-7551b838-0ff4-8469-ae73-403535efdf54    lima-murphy-srv-02.local:8201    follower    true
-eb9642f8-0cf8-e7fc-1ca6-1604d07d20f3    lima-murphy-srv-03.local:8201    follower    true
+```
+
+### Run a job to fetch secrets from vault
+
+```
+# Put secrets into vault kv
+vault login $VAULT_TOKEN
+vault secrets enable -path=secret kv
+vault kv put secret/mysecret username="john" password="password123"
+vault kv get secret/mysecret
+
+# Run job to fetch those secrets 
+nomad run vault.job.hcl
+nomad job status fetch-secret
+
+# Check logs to see if it returns the secrets from vault
+nomad alloc logs <alloc-id>
 ```
 
 ### Destroy
