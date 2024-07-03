@@ -56,11 +56,16 @@ provision:
     script: |
       #!/bin/bash
 
+      NOMAD_NODE_POOL=${NOMAD_NODE_POOL:-default}
+
+
       if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
       cat <<-EOF > /etc/nomad.d/client.hcl
         client {
           enabled = true
           servers = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+
+          node_pool = "${NOMAD_NODE_POOL}"
         }
       EOF
       fi
