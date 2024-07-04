@@ -112,7 +112,7 @@ provision:
      export VAULT_ADDR=http://127.0.0.1:8200
  
      # Set hostname to create nomad policy and roles
-      if [[ "$HOSTNAME" == *"srv-01"* ]]; then - fix
+      if [[ "$HOSTNAME" == *"srv-01"* ]]; then
       
      # Login to vault using token and create role and policy
       vault login $VAULT_TOKEN
