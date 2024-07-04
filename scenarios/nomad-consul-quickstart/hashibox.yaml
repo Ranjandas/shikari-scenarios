@@ -115,7 +115,7 @@ provision:
 
           network_interface = "lima0"
 
-          node_pool = ${NOMAD_NODE_POOL}
+          node_pool = "${NOMAD_NODE_POOL}"
         }
       EOF
       fi
