@@ -1,0 +1,272 @@
+images:
+  # Try to use a local image first.
+  - location: ~/artifacts/qemu/c-1.18-n-1.7-v-1.17/c-1.18-n-1.7-v-1.17.qcow2
+
+plain: true
+
+provision:
+  - mode: system # Install Consul, Nomad and Vault Licenses if any
+    script: |
+      #!/bin/bash
+
+      if [[ -n $CONSUL_LICENSE ]]; then
+        echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+      fi
+
+      if [[ -n $NOMAD_LICENSE ]]; then
+        echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
+      fi
+
+      if [[ -n $VAULT_LICENSE ]]; then
+        echo "VAULT_LICENSE=$VAULT_LICENSE" > /etc/vault.d/vault.env
+      fi
+  
+  - mode: system # configure Vault Server settings
+    script: |
+      #!/bin/bash
+
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
+          
+      HOSTNAME=$(hostname -s)
+
+      cat <<-EOF > /etc/vault.d/vault.hcl
+        api_addr = "http://${HOSTNAME}.local:8200"
+        cluster_addr = "http://${HOSTNAME}.local:8201"
+
+        ui = true
+        log_level="debug"
+
+        storage "raft" {
+          path = "/opt/vault"
+
+          $(for x in $(seq $SHIKARI_SERVER_COUNT); do
+          echo retry_join {
+          echo  leader_api_addr = \"http://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200\"
+          echo }
+          done)
+        }
+
+        #license_path = "/etc/vault.d/vault.license"
+
+        listener "tcp" {
+        address       = "0.0.0.0:8200"
+        tls_disable   = "true"
+        cluster_address = "0.0.0.0:8201"
+        }
+      EOF
+      fi
+
+      # Use nomad to format the config file if it exists
+      command -v nomad &>/dev/null && nomad fmt /etc/vault.d/vault.hcl
+
+  - mode:      # required to run unseal vault
+    script: |
+      systemctl enable --now vault
+  
+  - mode: system # Init and Unseal Vault
+    script: |
+      #!/bin/bash
+      export VAULT_ADDR=http://127.0.0.1:8200
+
+      # Set the hostname to unseal vault
+      if [[ "$HOSTNAME" == *"srv-01"* ]]; then
+
+        # Wait for Vault to be available
+        until curl -s $VAULT_ADDR/v1/sys/health; do
+          echo "Waiting for Vault"
+        done
+        
+        # Initialize Vault
+        vault operator init -key-shares=1 -key-threshold=1 -format=json > ~/VaultCreds.json
+
+        sudo mv ~/VaultCreds.json /etc/vault.d/VaultCreds.json
+        sudo chown root:vault /etc/vault.d/VaultCreds.json
+        sudo chmod 0640 /etc/vault.d/VaultCreds.json
+        
+        # Extract the unseal key and root token
+        VAULT_UNSEAL_KEY=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .unseal_keys_b64[0])
+        VAULT_TOKEN=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .root_token)
+
+        # Set environment variables for future sessions
+        echo '' | sudo tee /etc/profile.d/vault.sh
+        echo 'export VAULT_ADDR="http://127.0.0.1:8200" ; export VAULT_UNSEAL_KEY=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .unseal_keys_b64[0]) ; export VAULT_RAFT_AUTOPILOT_DISABLE=true ; export VAULT_TOKEN=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .root_token)' | sudo tee /etc/profile.d/vault.sh
+
+        # Unseal the Vault
+        vault operator unseal ${VAULT_UNSEAL_KEY}
+
+        # Login to Vault
+        vault login ${VAULT_TOKEN}
+
+        for x in `seq 2 $SHIKARI_SERVER_COUNT`; do
+          until [ $(curl -s http://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200/v1/sys/health | jq -r '.initialized') = true ]; do 
+            echo "Waiting for Vault"
+            sleep 2
+          done
+          VAULT_ADDR="http://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200" vault operator unseal $VAULT_UNSEAL_KEY
+        done
+      fi
+  
+  - mode: system # Configure nomad policy and role
+    script: |
+     #!/bin/bash
+     export VAULT_ADDR=http://127.0.0.1:8200
+ 
+     # Set hostname to create nomad policy and roles
+      if [[ "$HOSTNAME" == *"srv-01"* ]]; then
+      
+     # Login to vault using token and create role and policy
+      vault login $VAULT_TOKEN
+
+      echo 'path "auth/token/lookup-self" { capabilities = ["read"] } path "auth/token/renew-self" { capabilities = ["update"] } path "auth/token/revoke-self" { capabilities = ["update"] } path "auth/token/revoke-accessor" { capabilities = ["update"] } path "sys/capabilities-self" { capabilities = ["update"] } path "auth/token/roles/nomad-role" { capabilities = ["read"] } path "auth/token/create/nomad-role" { capabilities = ["update"] } path "secret/mysecret" { capabilities = ["read"] }' | vault policy write nomad-policy -
+      vault token create -policy=nomad-policy
+      vault write auth/token/roles/nomad-role   allowed_policies="nomad-policy"   period="24h"
+
+      # Step 1: Generate the Vault token
+      NOMAD_VAULT_TOKEN=$(vault token create -role=nomad-role -format=json | jq -r '.auth.client_token')
+
+      # # Step 2: Export the token as an environment variable
+      # export NOMAD_VAULT_TOKEN
+
+      # Step 3: Append the NOMAD_VAULT_TOKEN to the /etc/profile.d/vault.sh file
+      echo 'export NOMAD_VAULT_TOKEN='"${NOMAD_VAULT_TOKEN}" | sudo tee -a /etc/profile.d/vault.sh
+
+      fi
+
+  - mode:  system # Configure Consul Common Settings
+    script: |
+      #!/bin/bash
+
+      # common config for Server and Client
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "DEBUG"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+        datacenter = "${SHIKARI_CLUSTER_NAME}"
+
+        ui_config {
+          enabled = true
+        }
+      EOF
+
+  - mode: system # Configure Consul Server Settings
+    script: |
+      #!/bin/bash
+
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/server.hcl
+        connect {
+          enabled = true
+        }
+
+        server = true
+        bootstrap_expect = $SHIKARI_SERVER_COUNT
+      EOF
+      fi
+
+  - mode: system # Configure Consul Client Settings
+    script: |
+      #!/bin/bash
+
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/client.hcl
+
+        recursors = ["1.1.1.1", "8.8.8.8"]
+
+        ports {
+          grpc = 8502
+        }
+      EOF
+      fi
+
+  - mode: system # Configure Nomad Common Settings
+    script: |
+      #!/bin/bash
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+        data_dir  = "/opt/nomad/data"
+        bind_addr = "0.0.0.0"
+        datacenter = "${SHIKARI_CLUSTER_NAME}"
+        log_level = "DEBUG"
+
+        advertise {
+          http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          rpc = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          serf = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        }
+      EOF
+  
+  - mode: system # configure Nomad Server Settings
+    script: |
+      #!/bin/bash
+
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/server.hcl
+        server {
+        #license_path = "/etc/nomad.d/license.hclic"
+        enabled = true
+        bootstrap_expect = $SHIKARI_SERVER_COUNT
+
+          server_join {
+            retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+          }
+        }
+      EOF
+      fi
+
+
+  - mode: system # configure Nomad Server Settings with vault block
+    script: |
+      #!/bin/bash
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
+
+      # Step 2: Export the token as an environment variable
+      export NOMAD_VAULT_TOKEN
+      source /etc/profile.d/vault.sh
+      echo $NOMAD_VAULT_TOKEN
+
+      cat <<-EOF > /etc/nomad.d/vault.hcl
+      vault {
+        enabled = true
+        address = "http://127.0.0.1:8200"
+        token   = "${NOMAD_VAULT_TOKEN}"
+        role    = "nomad-role"
+       }
+      EOF
+      fi
+     
+  - mode: system # configure Nomad Client Settings with vault block
+    script: |
+      #!/bin/bash
+
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/client.hcl
+        client {
+          enabled = true
+          servers = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+
+          network_interface = "lima0"
+        }
+        vault {
+          enabled = true
+           address = "http://lima-${SHIKARI_CLUSTER_NAME}-srv-01.local:8200"
+        }
+      EOF
+      fi
+
+  - mode:
+    script: |
+      systemctl enable --now docker
+      systemctl enable --now consul nomad
+  - mode: user
+    script: |
+      #!/bin/sh
+      nomad -autocomplete-install
+      consul -autocomplete-install
+      vault -autocomplete-install
+  
+networks:
+  - lima: shared
+vmType: qemu
+env:
+  SHIKARI_SCENARIO_NAME: "nomad-consul-vault-quickstart"
