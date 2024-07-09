@@ -22,9 +22,14 @@ provision:
   - mode: system # Configure Nomad common settings
     script: |
       #!/bin/bash
+
+      # allow the DC name to be overriden by NOMAD_DC environment variable
+      NOMAD_DC_NAME="${NOMAD_DC:-$SHIKARI_CLUSTER_NAME}"
+
       cat <<-EOF > /etc/nomad.d/nomad.hcl
         data_dir  = "/opt/nomad/data"
         bind_addr = "0.0.0.0"
+        datacenter = "${NOMAD_DC_NAME}"
         log_level = "DEBUG"
 
         advertise {
