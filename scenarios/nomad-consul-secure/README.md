@@ -1,6 +1,8 @@
 # Scenario: Nomad Consul Quickstart
 
-This scenario deploys both Nomad and Consul with out any of the security configurations in place. This scenario is useful when you have to play around the features of Nomad (with or without Consul) and not worry about the security aspects.
+This scenario deploys both Nomad and Consul with ACLs and TLS in place. This scenario is useful when you have to play around the features of Nomad (with or without Consul).
+
+This scenario also supports Consul Workload Identity and is enabled by default when the Nomad version is `>=1.8.0`. If you would like to disable Workload Identity configuration with versions `>=1.8.0`, please pass `-e NOMAD_CONSUL_WI=false` with `shikari create`.
 
 ## Prerequsites
 
@@ -46,7 +48,8 @@ murphy        murphy-srv-03       Running       100            4                
 You can export the required environment variables to access both Nomad and Consul
 
 ```
-$ eval $(shikari env -n murphy)
+$ eval $(shikari env -n murphy -tai consul)
+$ eval $(shikari env -n murphy -tai nomad)
 
 $ consul members
 Node                Address              Status  Type    Build   Protocol  DC      Partition  Segment

@@ -18,6 +18,40 @@ provision:
         echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
       fi
 
+  - mode: system # Inject helper vars. Source the variable file to access them.
+    script: |
+      #!/bin/bash
+
+      SHIKARI_ENV_FILE=/etc/profile.d/shikari.sh
+
+      nomad_version=$(nomad --version | sed -n 's/^Nomad v\([0-9]\+\.[0-9]\+\).*/\1/p')
+      nomad_required_version="1.8"
+
+      if awk 'BEGIN { exit !('"${nomad_version}"' >= '"${nomad_required_version}"') }'; then
+        consul_wi_supported=true
+        exec2_supported=true
+      else
+        consul_wi_supported=false
+        exec2_supported=false
+      fi
+
+      {
+        echo "export NOMAD_CONSUL_WI_SUPPORTED=${consul_wi_supported}"
+        echo "export NOMAD_DRIVER_EXEC2_SUPPORTED=${exec2_supported}"
+      } >> "${SHIKARI_ENV_FILE}"
+
+
+      NOMAD_CONSUL_WI=${NOMAD_CONSUL_WI:-true}
+
+      echo "export NOMAD_CONSUL_WI=${NOMAD_CONSUL_WI}" >> "${SHIKARI_ENV_FILE}"
+
+      # Consul Environment Variables
+      {
+        echo "export CONSUL_HTTP_ADDR=https://localhost:8501"
+        echo "export CONSUL_CACERT=/etc/consul.d/certs/consul-agent-ca.pem"
+        echo "export CONSUL_HTTP_TOKEN=root"
+      } >> "${SHIKARI_ENV_FILE}"
+
   - mode:  system # Configure Consul common settings
     script: |
       #!/bin/bash
@@ -155,19 +189,12 @@ provision:
       }
       EOF
 
-      cat <<-EOF > /etc/nomad.d/consul.hcl
-      consul {
-        address = "127.0.0.1:8501"
-        token = "root"
-        ssl = true
-        ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
-        grpc_ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
-      }
-      EOF
-
   - mode: system # configure Nomad server settings
     script: |
       #!/bin/bash
+
+      # source the helper variables
+      source /etc/profile.d/shikari.sh
 
       if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
       cat <<-EOF > /etc/nomad.d/server.hcl
@@ -181,7 +208,31 @@ provision:
           }
         }
       EOF
+
+      cat <<-EOF > /etc/nomad.d/consul.hcl
+      consul {
+        address = "127.0.0.1:8501"
+        token = "root"
+        ssl = true
+        ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
+        grpc_ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
+
+      $(if [[ ${NOMAD_CONSUL_WI_SUPPORTED} == true ]] && [[ "${NOMAD_CONSUL_WI,,}" == true ]]; then
+        echo 'service_identity {
+          aud = ["consul.io"]
+          ttl = "1h"
+        }
+
+        task_identity {
+          aud = ["consul.io"]
+          ttl = "1h"
+        }'
+      fi)
+      }
+      EOF
       fi
+
+
 
   - mode: system # configure Nomad client settings
     script: |
@@ -200,18 +251,26 @@ provision:
           node_pool = "${NOMAD_NODE_POOL}"
         }
       EOF
+
+      cat <<-EOF > /etc/nomad.d/consul.hcl
+      consul {
+        address = "127.0.0.1:8501"
+        token = "root"
+        ssl = true
+        ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
+        grpc_ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
+      }
+      EOF
       fi
 
   - mode: system # configure Nomad exec2 driver
     script: |
       #!/bin/bash
 
-      # Get Nomad version
-      nomad_version=$(nomad --version | sed -n 's/^Nomad v\([0-9]\+\.[0-9]\+\).*/\1/p')
-      nomad_required_version="1.8"
+      # source the helper variables
+      source /etc/profile.d/shikari.sh
 
-      if awk 'BEGIN { exit !('"${nomad_version}"' >= '"${nomad_required_version}"') }' && [[ ${SHIKARI_VM_MODE} == "client" ]]; then
-      # Check if Nomad version is 1.8 or higher
+      if [[ "${NOMAD_DRIVER_EXEC2_SUPPORTED}" == "true" ]]; then
       cat <<-EOF > /etc/nomad.d/exec2.hcl
       plugin "nomad-driver-exec2" {
         config {
@@ -273,9 +332,8 @@ provision:
     script: |
       #!/bin/sh
 
-      export CONSUL_HTTP_ADDR=https://localhost:8501
-      export CONSUL_CACERT=/etc/consul.d/certs/consul-agent-ca.pem
-      export CONSUL_HTTP_TOKEN=root
+      # source the helper variables
+      source /etc/profile.d/shikari.sh
 
       until curl -s -k ${CONSUL_HTTP_ADDR}/v1/status/leader | grep 8300; do
         echo "Waiting for Consul to start"
@@ -297,7 +355,20 @@ provision:
         echo $acl_rule | consul acl policy create -name anon-policy -rules=-
         consul acl token update -accessor-id=00000000-0000-0000-0000-000000000002 --policy-name anon-policy
       fi
-      
+
+  - mode: system # Configure Nomad Consul Workload Identity
+    script: |
+      #!/bin/bash
+
+      # source the helper variables
+      source /etc/profile.d/shikari.sh
+
+      if [[ "${NOMAD_CONSUL_WI_SUPPORTED}" == "true" ]] && [[ "${NOMAD_CONSUL_WI,,}" == true ]] && [[ ${HOSTNAME} == "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
+
+          nomad setup consul -y -jwks-url https://localhost:4646/.well-known/jwks.json -jwks-ca-file /etc/nomad.d/certs/global-server-nomad.pem
+
+      fi
+
   - mode: user
     script: |
       #!/bin/sh
