@@ -1,8 +1,8 @@
 # Scenario: Nomad Consul Quickstart
 
-This scenario deploys both Nomad and Consul with ACLs and TLS in place. This scenario is useful when you have to play around the features of Nomad (with or without Consul).
+This scenario deploys both Nomad and Consul with ACLs and TLS in place. It is useful when you have to play around with Nomad's features (with or without Consul).
 
-This scenario also supports Consul Workload Identity and is enabled by default when the Nomad version is `>=1.8.0`. If you would like to disable Workload Identity configuration with versions `>=1.8.0`, please pass `-e NOMAD_CONSUL_WI=false` with `shikari create`.
+It also supports Consul Workload Identity and is enabled by default when the Nomad version is `>=1.8.0`. If you need to disable Workload Identity configuration with versions `>=1.8.0`, please pass `-e NOMAD_CONSUL_WI=false` with `shikari create`.
 
 ## Prerequsites
 
