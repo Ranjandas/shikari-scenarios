@@ -27,10 +27,11 @@ provision:
       nomad_version=$(nomad --version | sed -n 's/^Nomad v\([0-9]\+\.[0-9]\+\).*/\1/p')
       nomad_required_version="1.8"
 
-      if awk 'BEGIN { exit !('"${nomad_version}"' >= '"${nomad_required_version}"') }'; then
-        consul_wi_supported=true
-        exec2_supported=true
-      else
+      # by default we assume that WI and Exec2 is supported
+      consul_wi_supported=true
+      exec2_supported=true
+
+      if awk 'BEGIN { exit !('"${nomad_version}"' < '"${nomad_required_version}"') }'; then
         consul_wi_supported=false
         exec2_supported=false
       fi
@@ -217,7 +218,7 @@ provision:
         ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
         grpc_ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
 
-      $(if [[ ${NOMAD_CONSUL_WI_SUPPORTED} == true ]] && [[ "${NOMAD_CONSUL_WI,,}" == true ]]; then
+      $(if [[ "${NOMAD_CONSUL_WI_SUPPORTED}" == true ]] && [[ "${NOMAD_CONSUL_WI,,}" == true ]]; then
         echo 'service_identity {
           aud = ["consul.io"]
           ttl = "1h"
