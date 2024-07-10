@@ -53,6 +53,12 @@ provision:
         echo "export CONSUL_HTTP_TOKEN=root"
       } >> "${SHIKARI_ENV_FILE}"
 
+      # Token for Consul Block in Nomad Servers and Clients
+      {
+        echo "export NOMAD_SERVER_CONSUL_TOKEN=$(uuidgen --namespace @oid --name nomad-sever-consul-token --sha1)"
+        echo "export NOMAD_CLIENT_CONSUL_TOKEN=$(uuidgen --namespace @oid --name nomad-client-consul-token --sha1)"
+      } >> "${SHIKARI_ENV_FILE}"
+
   - mode:  system # Configure Consul common settings
     script: |
       #!/bin/bash
@@ -217,7 +223,7 @@ provision:
       cat <<-EOF > /etc/nomad.d/consul.hcl
       consul {
         address = "127.0.0.1:8501"
-        token = "root"
+        token = "${NOMAD_SERVER_CONSUL_TOKEN}"
         ssl = true
         ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
         grpc_ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
@@ -237,11 +243,12 @@ provision:
       EOF
       fi
 
-
-
   - mode: system # configure Nomad client settings
     script: |
       #!/bin/bash
+
+      # source the helper variables
+      source /etc/profile.d/shikari.sh
 
       NOMAD_NODE_POOL=${NOMAD_NODE_POOL:-default}
 
@@ -260,7 +267,7 @@ provision:
       cat <<-EOF > /etc/nomad.d/consul.hcl
       consul {
         address = "127.0.0.1:8501"
-        token = "root"
+        token = "${NOMAD_CLIENT_CONSUL_TOKEN}"
         ssl = true
         ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
         grpc_ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
@@ -350,25 +357,117 @@ provision:
 
 
       # Update anonymous token policy from the first server
+      # Don't run the script if not on the first server node. This is to avoid duplication.
 
-      if echo $HOSTNAME | grep srv-01$ > /dev/null 2>&1; then
-        if consul version | head -n 1 | grep ent > /dev/null 2>&1; then
-          acl_rule='partition "default" { namespace "default" { query_prefix "" { policy = "read" } } } partition_prefix "" { namespace_prefix "" { node_prefix "" { policy = "read" } service_prefix "" { policy = "read" } } }'
-        else
-          acl_rule='node_prefix "" { policy = "read" } service_prefix "" { policy = "read" } query_prefix "" { policy = "read" }'
-        fi
-        echo $acl_rule | consul acl policy create -name anon-policy -rules=-
-        consul acl token update -accessor-id=00000000-0000-0000-0000-000000000002 --policy-name anon-policy
+      if [[ "${HOSTNAME}" != "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
+        exit 0
       fi
+
+      anon_acl_policy='
+        node_prefix "" {
+          policy = "read"
+        }
+        service_prefix "" {
+          policy = "read"
+        }
+        query_prefix "" {
+          policy = "read"
+        }
+      '
+
+
+      if consul version | head -n 1 | grep ent > /dev/null 2>&1; then
+        anon_acl_policy='
+          partition "default" {
+            namespace "default" {
+              query_prefix "" {
+                policy = "read"
+              }
+            }
+          }
+          partition_prefix "" {
+            namespace_prefix "" {
+              node_prefix "" {
+                policy = "read"
+              }
+              service_prefix "" {
+                policy = "read"
+              }
+            }
+          }
+        '
+      fi
+
+      echo "${anon_acl_policy}" | consul acl policy create -name anon-policy -rules=-
+      consul acl token update -accessor-id=00000000-0000-0000-0000-000000000002 --policy-name anon-policy
+
+
+  - mode: system # Create Consul ACL Tokens for Nomad
+    script: |
+      #!/bin/bash
+
+      # Don't run the script if not on the first server node. This is to avoid duplication.
+      if [[ "${HOSTNAME}" != "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
+        exit 0
+      fi
+
+      # source the helper variables
+      source /etc/profile.d/shikari.sh
+
+      # ref: https://developer.hashicorp.com/nomad/docs/integrations/consul/acl#nomad-agents
+
+      nomad_server_consul_policy='
+        agent_prefix "" {
+          policy = "read"
+        }
+
+        node_prefix "" {
+          policy = "read"
+        }
+
+        service_prefix "" {
+          policy = "write"
+        }
+
+        acl  = "write"
+        mesh = "write"
+      '
+
+      nomad_client_consul_policy='
+        agent_prefix "" {
+          policy = "read"
+        }
+
+        node_prefix "" {
+          policy = "read"
+        }
+
+        service_prefix "" {
+          policy = "write"
+        }
+      '
+
+      # create the policies
+      echo "${nomad_server_consul_policy}" | consul acl policy create -name nomad-server-consul-policy -rules -
+      echo "${nomad_client_consul_policy}" | consul acl policy create -name nomad-client-consul-policy -rules -
+
+      # create the tokens
+      consul acl token create -secret "${NOMAD_SERVER_CONSUL_TOKEN}" -policy-name nomad-server-consul-policy
+      consul acl token create -secret "${NOMAD_CLIENT_CONSUL_TOKEN}" -policy-name nomad-client-consul-policy
 
   - mode: system # Configure Nomad Consul Workload Identity
     script: |
       #!/bin/bash
 
+      # Don't run the script if not on the first server node. This is to avoid duplication.
+      if [[ "${HOSTNAME}" != "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
+        exit 0
+      fi
+
       # source the helper variables
       source /etc/profile.d/shikari.sh
 
-      if [[ "${NOMAD_CONSUL_WI_SUPPORTED}" == "true" ]] && [[ "${NOMAD_CONSUL_WI,,}" == true ]] && [[ ${HOSTNAME} == "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
+      if [[ "${NOMAD_CONSUL_WI_SUPPORTED}" == "true" ]] && [[ "${NOMAD_CONSUL_WI,,}" == true ]]; then
 
           nomad setup consul -y -jwks-url https://localhost:4646/.well-known/jwks.json -jwks-ca-file /etc/nomad.d/certs/global-server-nomad.pem
 
