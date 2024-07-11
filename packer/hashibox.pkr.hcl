@@ -141,9 +141,11 @@ build {
       "curl -L -o /tmp/consul-cni.zip https://releases.hashicorp.com/consul-cni/$${CONSUL_CNI_VERSION}/consul-cni_$${CONSUL_CNI_VERSION}_linux_$( [ $(uname -m) = aarch64 ] && echo arm64 || echo amd64).zip",
       "sudo unzip /tmp/consul-cni.zip -d /usr/libexec/cni/",
 
-      # Provision Nomad and Consul CA's that can be later used for agent cert provisioning.
+      # Provision Nomad, Consul and Vault CA's that can be later used for agent cert provisioning.
       "sudo mkdir /etc/consul.d/certs && cd /etc/consul.d/certs ; sudo consul tls ca create",
       "sudo mkdir /etc/nomad.d/certs && cd /etc/nomad.d/certs ; sudo nomad tls ca create",
+      # this will generate CA with the name vault-agent-ca.pem. Ensure the cert generation commands out of these CA use `-domain vault`
+      "sudo mkdir /etc/vault.d/certs && cd /etc/vault.d/certs ; sudo consul tls ca create -domain vault",
 
       # Install exec2 driver and copy under /opt/nomad/data/plugins dir
       "sudo dnf install -y nomad-driver-exec2 --enablerepo hashicorp-test",
@@ -153,6 +155,7 @@ build {
       # Set permissions for the certs directory
       "sudo chown consul:consul /etc/consul.d/certs",
       "sudo chown nomad:nomad /etc/nomad.d/certs",
+      "sudo chown vault:vault /etc/vault.d/certs",
 
       # Enabling of the services is the responsibility of the instance provisioning scripts.
       "sudo systemctl disable docker consul nomad"
