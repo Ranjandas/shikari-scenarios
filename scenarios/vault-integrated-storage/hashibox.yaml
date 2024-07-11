@@ -136,8 +136,8 @@ provision:
       touch /shikari-bootstrapped
 
 copyToHost:
-- guest: "/opt/vault/tls/consul-agent-ca.pem"
-  host: "{{.Dir}}/copied-from-guest/consul-agent-ca.pem"
+  - guest: "/opt/vault/tls/consul-agent-ca.pem"
+    host: "{{.Dir}}/copied-from-guest/consul-agent-ca.pem"
 
 networks:
   - lima: shared
