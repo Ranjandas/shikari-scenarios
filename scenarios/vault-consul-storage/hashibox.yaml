@@ -263,6 +263,12 @@ provision:
 
       touch /shikari-bootstrapped
 
+copyToHost:
+  - guest: "/etc/consul.d/certs/consul-agent-ca.pem"
+    host: "{{.Dir}}/copied-from-guest/consul-agent-ca.pem"
+  - guest: "/etc/vault.d/certs/vault-agent-ca.pem"
+    host: "{{.Dir}}/copied-from-guest/vault-agent-ca.pem"
+
 networks:
   - lima: shared
 vmType: qemu
