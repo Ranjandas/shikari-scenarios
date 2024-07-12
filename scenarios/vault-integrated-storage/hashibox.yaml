@@ -17,13 +17,11 @@ provision:
         exit 0
       fi
 
-      cd /opt/vault/tls
+      cd /etc/vault.d/certs
 
-      cp /etc/consul.d/certs/* .
-
-      consul tls cert create -server -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local') -additional-dnsname ${HOSTNAME}.local
-
-      chown vault:vault /opt/vault/tls/*
+      consul tls cert create -domain vault -server -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local') -additional-dnsname ${HOSTNAME}.local
+      
+      chown -R vault:vault /etc/vault.d/certs/*
 
   - mode: system # configure Vault Server
     script: |
@@ -49,9 +47,9 @@ provision:
         $(for x in $(seq $SHIKARI_SERVER_COUNT); do
         echo retry_join {
         echo leader_api_addr      = \"https://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200\"
-        echo leader_ca_cert_file  = \"/opt/vault/tls/consul-agent-ca.pem\"
-        echo leader_client_cert_  = \"/opt/vault/tls/dc1-server-consul-0.pem\"
-        echo leader_client_kile   = \"/opt/vault/tls/dc1-server-consul-0-key.pem\"
+        echo leader_ca_cert_file  = \"/etc/vault.d/certs/vault-agent-ca.pem\"
+        echo leader_client_cert_  = \"/etc/vault.d/certs/dc1-server-vault-0.pem\"
+        echo leader_client_kile   = \"/etc/vault.d/certs/dc1-server-vault-0-key.pem\"
         echo }
        done)
       }
@@ -59,9 +57,9 @@ provision:
       listener "tcp" {
         address       = "0.0.0.0:8200"
         
-        tls_cert_file       = "/opt/vault/tls/dc1-server-consul-0.pem"
-        tls_key_file        = "/opt/vault/tls/dc1-server-consul-0-key.pem"
-        tls_client_ca_file  = "/opt/vault/tls/consul-agent-ca.pem"
+        tls_cert_file       = "/etc/vault.d/certs/dc1-server-vault-0.pem"
+        tls_key_file        = "/etc/vault.d/certs/dc1-server-vault-0-key.pem"
+        tls_client_ca_file  = "/etc/vault.d/certs/vault-agent-ca.pem"
         
         cluster_address = "0.0.0.0:8201"
       }
@@ -88,11 +86,11 @@ provision:
       fi
 
       export VAULT_ADDR=https://127.0.0.1:8200
-      export VAULT_CACERT=/opt/vault/tls/consul-agent-ca.pem
+      export VAULT_CACERT=/etc/vault.d/certs/vault-agent-ca.pem
       
       if [[ "$HOSTNAME" == *"01"* ]]; then
         
-        until curl -s --cacert /opt/vault/tls/consul-agent-ca.pem $VAULT_ADDR/v1/sys/health; do
+        until curl -s --cacert /etc/vault.d/certs/vault-agent-ca.pem $VAULT_ADDR/v1/sys/health; do
           echo "Waiting for Vault"
         done
 
