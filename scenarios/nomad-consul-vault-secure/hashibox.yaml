@@ -1,0 +1,507 @@
+images:
+  # Try to use a local image first.
+  - location: ~/artifacts/qemu/c-1.18-n-1.7-v-1.17/c-1.18-n-1.7-v-1.17.qcow2
+
+plain: true
+
+provision:
+  - mode: system # Install Consul, Nomad and Vault Licenses if any
+    script: |
+      #!/bin/bash
+
+      if [[ -n $CONSUL_LICENSE ]]; then
+        echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+      fi
+
+      if [[ -n $NOMAD_LICENSE ]]; then
+        echo "NOMAD_LICENSE=$NOMAD_LICENSE" > /etc/nomad.d/nomad.env
+      fi
+
+      if [[ -n $VAULT_LICENSE ]]; then
+        echo "VAULT_LICENSE=$VAULT_LICENSE" > /etc/vault.d/vault.env
+      fi
+
+  - mode: system # generate certificates for vault
+    script: |
+      #!/bin/bash
+
+      # avoid running the script on restarts
+      if [[ -f /shikari-bootstrapped ]] then
+        exit 0
+      fi
+
+      cd /etc/vault.d/certs
+
+      cp /etc/consul.d/certs/* .
+
+      consul tls cert create -domain vault -server -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local') -additional-dnsname ${HOSTNAME}.local
+
+      chown -R vault:vault /etc/vault.d/certs/*
+  
+  - mode: system # configure Vault Server
+    script: |
+      #!/bin/bash
+
+      export VAULT_ADDR=https://127.0.0.1:8200
+      export VAULT_CACERT=/etc/vault.d/certs/consul-agent-ca.pem
+
+      # Set the hostname to unseal vault
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
+
+      HOSTNAME=$(hostname -s)
+
+      cat <<-EOF > /etc/vault.d/vault.hcl
+        api_addr     = "https://${HOSTNAME}.local:8200"
+        cluster_addr = "https://${HOSTNAME}.local:8201"
+        
+        ui = true
+        log_level="trace"
+
+        storage "raft" {
+          path = "/opt/vault"
+
+          $(for x in $(seq $SHIKARI_SERVER_COUNT); do
+          echo retry_join {
+          echo leader_api_addr      = \"https://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200\"
+          echo leader_ca_cert_file  = \"/etc/vault.d/certs/vault-agent-ca.pem\"
+          echo leader_client_cert_  = \"/etc/vault.d/certs/dc1-server-vault-0.pem\"
+          echo leader_client_kile   = \"/etc/vault.d/certs/dc1-server-vault-0-key.pem\"
+          echo }
+        done)
+        }
+
+        listener "tcp" {
+          address       = "0.0.0.0:8200"
+          
+          tls_cert_file       = "/etc/vault.d/certs/dc1-server-vault-0.pem"
+          tls_key_file        = "/etc/vault.d/certs/dc1-server-vault-0-key.pem"
+          tls_client_ca_file  = "/etc/vault.d/certs/vault-agent-ca.pem"
+          
+          cluster_address = "0.0.0.0:8201"
+        }
+        
+        # this will disable perf standby even if the license allows
+        #disable_performance_standby = true
+      EOF
+      fi
+
+  - mode: system  # start and enable Vault
+    script: |
+      systemctl enable --now vault
+
+  - mode: system  # init and unseal Vault
+    script: |
+      #!/bin/bash
+  
+      export VAULT_ADDR=https://127.0.0.1:8200
+      export VAULT_CACERT=/etc/vault.d/certs/vault-agent-ca.pem
+      
+      if [[ "$HOSTNAME" == *"srv-01"* ]]; then
+        
+        until curl -s --cacert /etc/vault.d/certs/vault-agent-ca.pem $VAULT_ADDR/v1/sys/health; do
+          echo "Waiting for Vault"
+        done
+
+        vault operator init -key-shares=1 -key-threshold=1 -format=json > ~/VaultCreds.json
+        
+        sudo mv ~/VaultCreds.json /etc/vault.d/VaultCreds.json
+        sudo chown root:vault /etc/vault.d/VaultCreds.json
+        sudo chmod 0640 /etc/vault.d/VaultCreds.json
+        
+        VAULT_UNSEAL_KEY=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .unseal_keys_b64[0])
+        VAULT_TOKEN=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .root_token)
+        
+        echo export VAULT_ADDR="https://127.0.0.1:8200" | sudo tee -a /etc/profile.d/vault.sh
+        echo export VAULT_CACERT=$VAULT_CACERT | sudo tee -a /etc/profile.d/vault.sh
+        echo export VAULT_UNSEAL_KEY=$VAULT_UNSEAL_KEY | sudo tee -a /etc/profile.d/vault.sh 
+        echo export VAULT_TOKEN=$VAULT_TOKEN | sudo tee -a /etc/profile.d/vault.sh      
+
+        # Unseal Vault      
+        vault operator unseal ${VAULT_UNSEAL_KEY}
+
+        vault login ${VAULT_TOKEN}
+
+        # execute the following in a subshell to not overwrite VAULT_ADDR
+
+            for x in `seq 2 $SHIKARI_SERVER_COUNT`; do
+              until [ "$(curl -s --cacert $VAULT_CACERT $VAULT_ADDR/v1/sys/health | jq -r '.initialized')" = "true" ]; do
+                echo "Waiting for Vault"
+                sleep 2
+              done
+              VAULT_ADDR="https://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200" vault operator unseal $VAULT_UNSEAL_KEY
+            done
+        fi
+
+  - mode: system # Configure nomad policy and role for vault token method
+    script: |
+     #!/bin/bash
+     export VAULT_ADDR=https://127.0.0.1:8200
+     export VAULT_CACERT=/etc/vault.d/certs/vault-agent-ca.pem
+ 
+     # Set hostname to create nomad policy and roles
+     if [[ "${NOMAD_VAULT_WI,,}" != true ]] && [[ ${HOSTNAME} == "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
+      
+     # Login to vault using token and create role and policy
+      vault login $VAULT_TOKEN
+
+      echo 'path "auth/token/lookup-self" { capabilities = ["read"] } path "auth/token/renew-self" { capabilities = ["update"] } path "auth/token/revoke-self" { capabilities = ["update"] } path "auth/token/revoke-accessor" { capabilities = ["update"] } path "sys/capabilities-self" { capabilities = ["update"] } path "auth/token/roles/nomad-role" { capabilities = ["read"] } path "auth/token/create/nomad-role" { capabilities = ["update"] } path "secret/mysecret" { capabilities = ["read"] }' | vault policy write nomad-policy -
+      vault token create -policy=nomad-policy
+      vault write auth/token/roles/nomad-role   allowed_policies="nomad-policy"   period="24h"
+
+      # Step 1: Generate the Vault token
+      NOMAD_VAULT_TOKEN=$(vault token create -role=nomad-role -format=json | jq -r '.auth.client_token')
+
+      # # Step 2: Export the token as an environment variable
+      # export NOMAD_VAULT_TOKEN
+
+      # Step 3: Append the NOMAD_VAULT_TOKEN to the /etc/profile.d/vault.sh file
+      echo 'export NOMAD_VAULT_TOKEN='"${NOMAD_VAULT_TOKEN}" | sudo tee -a /etc/profile.d/vault.sh
+
+      fi
+
+  - mode: system # Inject helper vars for work-load Identity. Source the variable file to access them.
+    script: |
+      #!/bin/bash
+
+      source /etc/profile.d/vault.sh
+      echo $NOMAD_VAULT_TOKEN
+
+      SHIKARI_ENV_FILE=/etc/profile.d/shikari.sh
+
+      nomad_version=$(nomad --version | sed -n 's/^Nomad v\([0-9]\+\.[0-9]\+\).*/\1/p')
+      nomad_required_version="1.8"
+
+      # by default we assume that WI is supported
+      vault_wi_supported=true
+
+      if awk 'BEGIN { exit !('"${nomad_version}"' < '"${nomad_required_version}"') }'; then
+          vault_wi_supported=false
+      fi
+
+      export NOMAD_VAULT_WI_SUPPORTED=${vault_wi_supported}
+      NOMAD_VAULT_WI=${NOMAD_VAULT_WI:-true}
+
+      echo "export NOMAD_VAULT_WI=${NOMAD_VAULT_WI}" >> "${SHIKARI_ENV_FILE}"
+
+      # WI config for Server
+      VAULT_SERVER_CONFIG="
+      vault {
+        enabled = true
+        address = \"https://127.0.0.1:8200\"
+        ca_file = \"/etc/vault.d/certs/vault-agent-ca.pem\"
+
+        default_identity {
+          aud = [\"vault.io\"]
+          ttl = \"1h\"
+        }
+      }
+      "
+
+      # WI config for Client
+      VAULT_CLIENT_CONFIG="
+      vault {
+        enabled = true
+        address = \"https://lima-${SHIKARI_CLUSTER_NAME}-srv-01.local:8200\"
+        ca_file = \"/etc/vault.d/certs/vault-agent-ca.pem\"
+        jwt_auth_backend_path = \"jwt-nomad\"
+      }
+      "
+      
+      # Legacy config for server and client
+      if [[ $NOMAD_VAULT_WI_SUPPORTED != true ]] || [[ $NOMAD_VAULT_WI != true ]]; then
+      VAULT_SERVER_CONFIG="
+      vault {
+        enabled = true
+        address = \"https://127.0.0.1:8200\"
+        ca_file = \"/etc/vault.d/certs/vault-agent-ca.pem\"
+        token   = \"${NOMAD_VAULT_TOKEN}\"
+        role    = \"nomad-role\"
+      }
+      "
+      VAULT_CLIENT_CONFIG="
+      vault {
+          enabled = true
+          address = \"https://lima-${SHIKARI_CLUSTER_NAME}-srv-01.local:8200\"
+          ca_file = \"/etc/vault.d/certs/vault-agent-ca.pem\"
+        }
+        "
+      fi
+      if [[ "$SHIKARI_VM_MODE" == "server" ]]; then
+        echo "$VAULT_SERVER_CONFIG" > /etc/nomad.d/vault.hcl
+      else
+        echo "$VAULT_CLIENT_CONFIG" > /etc/nomad.d/vault.hcl
+      fi
+
+      echo "$VAULT_SERVER_CONFIG"
+      echo "$VAULT_CLIENT_CONFIG"
+
+      # Nomad and Vault Environment Variables
+      {
+        echo "export NOMAD_ADDR=https://127.0.0.1:4646"
+        echo "export NOMAD_CACERT=/etc/nomad.d/certs/nomad-agent-ca.pem"
+        echo "export NOMAD_TOKEN=00000000-0000-0000-0000-000000000000"
+        echo "export VAULT_CACERT=/etc/vault.d/certs/vault-agent-ca.pem"
+        echo "export VAULT_ADDR=https://127.0.0.1:8200"
+      } >> "${SHIKARI_ENV_FILE}"
+
+
+  - mode:  system # Configure Consul common settings
+    script: |
+      #!/bin/bash
+
+      # common config for Server and Client
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "DEBUG"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+        datacenter = "${SHIKARI_CLUSTER_NAME}"
+
+        ui_config {
+          enabled = true
+        }
+      EOF
+
+      cat <<-EOF > /etc/consul.d/acl.hcl
+        acl {
+          enabled = true
+          default_policy = "deny"
+          down_policy = "extend-cache"
+          
+          enable_token_persistence = true
+
+          tokens {
+            initial_management = "root"
+            agent = "root"
+          }
+        }
+      EOF
+
+
+      ## Generate Consul Server Certificates
+
+      cd /etc/consul.d/certs
+      consul tls cert create -${SHIKARI_VM_MODE} -dc ${SHIKARI_CLUSTER_NAME} -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local')
+      chown consul:consul /etc/consul.d/certs/*
+      chmod 644 /etc/consul.d/certs/*
+
+      cat <<-EOF > /etc/consul.d/tls.hcl
+        tls {
+          defaults {
+            ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
+            cert_file = "/etc/consul.d/certs/${SHIKARI_CLUSTER_NAME}-${SHIKARI_VM_MODE}-consul-0.pem"
+            key_file = "/etc/consul.d/certs/${SHIKARI_CLUSTER_NAME}-${SHIKARI_VM_MODE}-consul-0-key.pem"
+            verify_server_hostname = true
+            verify_incoming = true
+            verify_outgoing = true
+          }
+          grpc {
+            verify_incoming = false
+          }
+          https {
+            verify_incoming = false
+          }
+        }
+      EOF
+
+  - mode: system # Configure Consul server settings
+    script: |
+      #!/bin/bash
+
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/server.hcl
+        connect {
+          enabled = true
+        }
+
+        server = true
+        bootstrap_expect = ${SHIKARI_SERVER_COUNT}
+      EOF
+
+      cat <<-EOF > /etc/consul.d/ports.hcl
+      ports {
+        https = 8501
+      }
+      EOF
+
+      fi
+
+  - mode: system # Configure Consul client settings
+    script: |
+      #!/bin/bash
+
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/client.hcl
+        ports {
+          grpc = 8502
+          grpc_tls = 8503
+          https = 8501
+        }
+
+        recursors = ["1.1.1.1", "8.8.8.8"]
+      EOF
+      fi
+
+  - mode: system # Configure Nomad common settings
+    script: |
+      #!/bin/bash
+
+      # allow the DC name to be overriden by NOMAD_DC environment variable
+      NOMAD_DC_NAME="${NOMAD_DC:-$SHIKARI_CLUSTER_NAME}"
+
+      cat <<-EOF > /etc/nomad.d/nomad.hcl
+        data_dir  = "/opt/nomad/data"
+        bind_addr = "0.0.0.0"
+        datacenter = "${NOMAD_DC_NAME}"
+        log_level = "DEBUG"
+
+        advertise {
+          http = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          rpc = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+          serf = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        }
+      EOF
+
+      cat <<-EOF > /etc/nomad.d/acl.hcl
+      acl {
+        enabled = true
+      }
+      EOF
+
+      ## Generate TLS Certificates
+
+      cd /etc/nomad.d/certs
+      nomad tls cert create -${SHIKARI_VM_MODE} -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local')
+
+      cat <<-EOF > /etc/nomad.d/tls.hcl
+      tls {
+        http = true
+        rpc = true
+
+        ca_file = "/etc/nomad.d/certs/nomad-agent-ca.pem"
+        cert_file = "/etc/nomad.d/certs/global-${SHIKARI_VM_MODE}-nomad.pem"
+        key_file = "/etc/nomad.d/certs/global-${SHIKARI_VM_MODE}-nomad-key.pem"
+
+        verify_server_hostname = true
+      }
+      EOF
+
+      cat <<-EOF > /etc/nomad.d/consul.hcl
+      consul {
+        address = "127.0.0.1:8501"
+        token = "root"
+        ssl = true
+        ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
+        grpc_ca_file = "/etc/consul.d/certs/consul-agent-ca.pem"
+      }
+      EOF
+
+  - mode: system # configure Nomad server settings
+    script: |
+      #!/bin/bash
+
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
+      cat <<-EOF > /etc/nomad.d/server.hcl
+        server {
+        #license_path = "/etc/nomad.d/license.hclic"
+        enabled = true
+        bootstrap_expect = ${SHIKARI_SERVER_COUNT}
+
+          server_join {
+            retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+          }
+        }
+      EOF
+      fi
+  
+  - mode: system # configure Nomad client settings
+    script: |
+      #!/bin/bash
+
+      NOMAD_NODE_POOL=${NOMAD_NODE_POOL:-default}
+
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
+      cat <<-EOF > /etc/nomad.d/client.hcl
+        client {
+          enabled = true
+          servers = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+
+          network_interface = "lima0"
+
+          node_pool = "${NOMAD_NODE_POOL}"
+        }
+      EOF
+      fi
+  
+  - mode: system
+    script: |
+      systemctl enable --now nomad
+
+  - mode: system # acl bootstrap nomad
+    script: |
+      #!/bin/sh
+      if echo $HOSTNAME | grep srv-01$ > /dev/null 2>&1; then
+      # Wait for nomad servers to come up and bootstrap nomad ACL
+      for i in {1..10}; do
+          # add sleep 5 secs
+          set +e
+          sleep 5
+          export NOMAD_ADDR=https://127.0.0.1:4646
+          export NOMAD_CACERT=/etc/nomad.d/certs/nomad-agent-ca.pem
+          OUTPUT=$(echo "00000000-0000-0000-0000-000000000000"|nomad acl bootstrap - 2>&1)
+          # checks if the previous command (nomad acl bootstrap) failed (non-zero exit status).
+          if [ $? -ne 0 ]; then
+              echo "nomad acl bootstrap: $OUTPUT"
+              if [[ "$OUTPUT" = *"No cluster leader"* ]]; then
+                  echo "nomad has no cluster leader"
+                  continue
+              else
+                  echo "nomad already bootstrapped"
+                  exit 0
+              fi
+          fi
+          set -e
+      done
+      fi
+
+  - mode: system # setup workload identity for vault
+    script: |
+      #!/bin/sh
+
+      # source the helper variables
+        source /etc/profile.d/shikari.sh
+        source /etc/profile.d/vault.sh
+
+      # Set hostname to run workload identity setup
+        if [[ "${NOMAD_VAULT_WI,,}" == true ]] && [[ ${HOSTNAME} == "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
+
+        echo $VAULT_TOKEN
+        vault login ${VAULT_TOKEN}
+        nomad setup vault -jwks-url=$NOMAD_ADDR/.well-known/jwks.json -jwks-ca-file=$NOMAD_CACERT -y
+        fi
+
+  - mode:
+    script: |
+      systemctl enable --now docker
+      systemctl enable --now consul
+  - mode: user
+    script: |
+      #!/bin/sh
+      nomad -autocomplete-install
+      consul -autocomplete-install
+      vault -autocomplete-install
+
+copyToHost:
+  - guest: "/etc/vault.d/certs/vault-agent-ca.pem"
+    host: "{{.Dir}}/copied-from-guest/vault-agent-ca.pem"
+  - guest: "/etc/consul.d/certs/consul-agent-ca.pem"
+    host: "{{.Dir}}/copied-from-guest/consul-agent-ca.pem"
+  - guest: "/etc/nomad.d/certs/nomad-agent-ca.pem"
+    host: "{{.Dir}}/copied-from-guest/nomad-agent-ca.pem"
+
+networks:
+  - lima: shared
+vmType: qemu
+env:
+  SHIKARI_SCENARIO_NAME: "nomad-consul-vault-secure"
