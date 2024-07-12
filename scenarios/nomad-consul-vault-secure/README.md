@@ -11,6 +11,7 @@ The following tools are required to run these scenarios:
 - Requires Packer build using Consul, Nomad and Vault binaries, may need to update the [variables.pkvars.hcl] file incase there's a need to change versions than default.
 - Update the vault.job.hcl to the correct shikari cluster name for datacenters block
 - This setup creates vault tokens for nomad jobs using workload Identity
+- It also supports Vault Workload Identity and is enabled by default when the Nomad version is `>=1.8.0`. If you need to disable Workload Identity configuration with versions `>=1.8.0`, please pass `-e NOMAD_CONSUL_WI=false` with `shikari create`.
 
 ## Usage
 
@@ -26,6 +27,7 @@ shikari create --name murphy \
                  --env NOMAD_LICENSE=$(cat /location/to/nomad/license) \
                  --env VAULT_LICENSE=$(cat /location/to/vault/license) \
                  --image ../../packer/.artifacts/<imagedir>/<image-file>.qcow2
+                 --env NOMAD_VAULT_WI=true/false
 
 ```
 
