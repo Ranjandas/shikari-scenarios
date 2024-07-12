@@ -10,12 +10,7 @@ job "fetch-secret" {
         command = "/bin/sh"
         args = ["-c", "cat ${NOMAD_SECRETS_DIR}/mysecret.json && sleep 3600"]
       }
-### for WI use this
-//      vault {}
-### for legacy use this
-       vault {
-        policies = ["nomad-policy"]
-      }
+      vault {}
  ## v1
       template {
         destination = "${NOMAD_SECRETS_DIR}/mysecret.json"
