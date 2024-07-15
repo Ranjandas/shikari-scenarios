@@ -217,6 +217,10 @@ provision:
 
       systemctl enable --now boundary
 
+copyToHost:
+  - guest: "/etc/boundary.d/certs/boundary-agent-ca.pem"
+    host: "{{.Dir}}/copied-from-guest/boundary-agent-ca.pem"
+    
 networks:
   - lima: shared
 vmType: qemu
