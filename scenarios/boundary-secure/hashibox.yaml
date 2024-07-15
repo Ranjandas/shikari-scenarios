@@ -1,0 +1,228 @@
+plain: true
+
+provision:
+
+  - mode: system # Install Boundary License
+    script: |
+      #!/bin/bash
+
+      if [[ -n $BOUNDARY_LICENSE ]]; then
+        grep -q BOUNDARY_LICENSE /etc/boundary.d/boundaryenv || echo "BOUNDARY_LICENSE=$BOUNDARY_LICENSE" > /etc/boundary.d/boundary.env
+      fi
+      
+  - mode: system # Start postgres db
+    script: |
+      #!/bin/bash
+
+      if [[ "${HOSTNAME}" != "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
+        exit 0
+      fi
+
+      export POSTGRES_USERNAME=postgres
+      export POSTGRES_PASSWORD=password
+      export BOUNDARY_DATABASE=boundary
+
+      systemctl enable --now docker
+      docker ps | grep -q boundary-postgres || docker run --name boundary-postgres -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" -p 5432:5432 -d postgres:alpine
+
+      until pg_isready -h localhost -U ${POSTGRES_USERNAME}; do echo waiting; sleep 1; done
+
+      # Sets the Postgres Password for non-interactive operations
+      export PGPASSWORD="${POSTGRES_PASSWORD}" 
+      psql -U ${POSTGRES_USERNAME} -tc "SELECT 1 FROM pg_database WHERE datname = \"${BOUNDARY_DATABASE}\"" -h localhost | grep -q 1 || psql -U ${POSTGRES_USERNAME} -h localhost -c "create database ${BOUNDARY_DATABASE}"
+
+      echo "BOUNDARY_DB_URL=postgresql://${POSTGRES_USERNAME}:${POSTGRES_PASSWORD}@lima-${SHIKARI_CLUSTER_NAME}-srv-01.local:5432/${BOUNDARY_DATABASE}" >> /etc/boundary.d/boundary.env
+
+  - mode: system # Create certificates and required directories
+    script: |
+      #!/bin/bash
+
+      LIMA_IP_ADDR=$(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local')
+
+      # Generate TLS Certificates
+      cd /etc/boundary.d/certs
+
+      if ! [[ -f dc1-server-boundary-0.pem ]]; then
+        consul tls cert create -server -domain boundary -additional-ipaddress $LIMA_IP_ADDR
+        cat boundary-agent-ca.pem >> dc1-server-boundary-0.pem # https://developer.hashicorp.com/boundary/docs/configuration/listener/tcp#tls_cert_file
+        chown boundary:boundary /etc/boundary.d/certs/*
+      fi
+
+      # Directory for audit logs
+      install -o boundary -g boundary -d /var/log/boundary
+
+  - mode: system # Configure controller
+    script: |
+      #!/bin/bash
+
+      if [[ "${SHIKARI_VM_MODE}" != "server" ]]; then
+        exit 0
+      fi
+
+      LIMA_IP_ADDR=$(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local')
+
+      # Create Controller Config
+      cat <<-EOF > /etc/boundary.d/boundary.hcl
+      disable_mlock = true
+
+      controller {
+        name = "${HOSTNAME}"
+        description = "Boundary Controller: ${HOSTNAME}"
+
+        database {
+          url = "env://BOUNDARY_DB_URL" # this is set inside /etc/boundary.d/boundary.env
+        }
+      }
+
+      listener "tcp" {
+        address = "${LIMA_IP_ADDR}"
+        purpose = "api"
+        
+        tls_disable         = false
+
+        tls_cert_file       = "/etc/boundary.d/certs/dc1-server-boundary-0.pem"
+        tls_key_file        = "/etc/boundary.d/certs/dc1-server-boundary-0-key.pem"
+        tls_client_ca_file  = "/etc/boundary.d/certs/boundary-agent-ca.pem"
+      }
+
+      # # Data-plane listener configuration block (used for worker coordination)
+      listener "tcp" {
+        address = "${LIMA_IP_ADDR}"
+        purpose = "cluster"
+      }
+
+      # # Root KMS configuration block: this is the root key for Boundary
+      # # Use a production KMS such as AWS KMS in production installs
+      kms "aead" {
+        purpose = "root"
+        aead_type = "aes-gcm"
+        key = "sP1fnF5Xz85RrXyELHFeZg9Ad2qt4Z4bgNHVGtD6ung="
+        key_id = "global_root"
+      }
+
+      # # Worker authorization KMS
+      # # Use a production KMS such as AWS KMS for production installs
+      # # This key is the same key used in the worker configuration
+      kms "aead" {
+        purpose = "worker-auth"
+        aead_type = "aes-gcm"
+        key = "8fZBjCUfN0TzjEGLQldGY4+iE9AkOvCfjh7+p0GtRBQ="
+        key_id = "global_worker-auth"
+      }
+
+      # # Recovery KMS block: configures the recovery key for Boundary
+      # # Use a production KMS such as AWS KMS for production installs
+      kms "aead" {
+        purpose = "recovery"
+        aead_type = "aes-gcm"
+        key = "8fZBjCUfN0TzjEGLQldGY4+iE9AkOvCfjh7+p0GtRBQ="
+        key_id = "global_recovery"
+      }
+
+      events {
+        audit_enabled       = true
+        sysevents_enabled   = true
+        observations_enable = true
+        sink "stderr" {
+          name = "all-events"
+          description = "All events sent to stderr"
+          event_types = ["*"]
+          format = "cloudevents-json"
+        }
+        sink {
+          name = "file-sink"
+          description = "All events sent to a file"
+          event_types = ["*"]
+          format = "cloudevents-json"
+          file {
+            path = "/var/log/boundary"
+            file_name = "controller.log"
+          }
+          audit_config {
+            audit_filter_overrides {
+              sensitive = "redact"
+              secret    = "redact"
+            }
+          }
+        }
+      }
+      EOF
+
+  - mode: system # Configure Workers
+    script: |
+      #!/bin/bash
+
+      if [[ "${SHIKARI_VM_MODE}" != "client" ]]; then
+        exit 0
+      fi
+
+      cat <<-EOF > /etc/boundary.d/boundary.hcl
+      listener "tcp" {
+          purpose = "proxy"
+          tls_disable = false
+          address = "0.0.0.0"
+
+          tls_cert_file       = "/etc/boundary.d/certs/dc1-server-boundary-0.pem"
+          tls_key_file        = "/etc/boundary.d/certs/dc1-server-boundary-0-key.pem"
+          tls_client_ca_file  = "/etc/boundary.d/certs/boundary-agent-ca.pem"
+      }
+
+      worker {
+        #   # Name attr must be unique across workers
+        name = "${HOSTNAME}"
+        description = "A default worker created demonstration"
+
+        #   # Workers must be able to reach controllers on :9201
+        controllers = [
+        $(for x in $(seq $SHIKARI_SERVER_COUNT); do
+          echo \"lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local\",
+        done)
+        ]
+
+        public_addr = "${HOSTNAME}.local"
+      }
+
+      # # must be same key as used on controller config
+      kms "aead" {
+          purpose = "worker-auth"
+          aead_type = "aes-gcm"
+          key = "8fZBjCUfN0TzjEGLQldGY4+iE9AkOvCfjh7+p0GtRBQ="
+          key_id = "global_worker-auth"
+      }
+      EOF
+
+
+  - mode: system # Populate boundary database
+    script: |
+      #!/bin/bash
+
+      if [[ "${HOSTNAME}" != "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
+        exit 0
+      fi
+
+      BOUNDARY_DB_INIT_JSON_FILE_PATH=/etc/boundary.d/db_init.json
+
+      # This export is required for the database init to have the connection string as we are using env:// in the controller config.
+      export $(cat /etc/boundary.d/boundary.env)
+
+      [[ -f ${BOUNDARY_DB_INIT_JSON_FILE_PATH} ]] || boundary database init -config /etc/boundary.d/boundary.hcl -format json | tee /etc/boundary.d/db_init.json
+
+  - mode: system # Start Boundary
+    script: |
+      #!/bin/bash
+
+      if [[ "${SHIKARI_VM_MODE}" == "server" ]]; then
+        until pg_isready -h lima-${SHIKARI_CLUSTER_NAME}-srv-01.local -U postgres; do echo waiting; sleep 1; done
+      fi
+
+      systemctl enable --now boundary
+
+copyToHost:
+  - guest: "/etc/boundary.d/certs/boundary-agent-ca.pem"
+    host: "{{.Dir}}/copied-from-guest/boundary-agent-ca.pem"
+    
+networks:
+  - lima: shared
+vmType: qemu
+env:
+  SHIKARI_SCENARIO_NAME: "boundary-secure"
