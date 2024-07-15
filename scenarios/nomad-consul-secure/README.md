@@ -1,4 +1,4 @@
-# Scenario: Nomad Consul Quickstart
+# Scenario: Nomad Consul Secure
 
 This scenario deploys both Nomad and Consul with ACLs and TLS in place. It is useful when you have to play around with Nomad's features (with or without Consul).
 
