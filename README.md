@@ -88,7 +88,7 @@ The following steps will build a VM image with Consul and Nomad installed, which
 3. Export the environment variables to access the cluster services.
 
     ```
-    $ eval $(shikari env -n demo)
+    $ eval $(shikari env -n demo consul)
     ```
 
 4. You can exec into the servers using the `limactl shell <vm-name>` command.
