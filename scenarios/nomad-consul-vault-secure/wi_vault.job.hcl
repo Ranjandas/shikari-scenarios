@@ -1,6 +1,6 @@
 
 job "fetch-secret" {
-  datacenters = ["murphy"]  # Update to match your your shikari cluster name
+  datacenters = ["*"] 
 
   group "example" {
     task "show-secret" {
@@ -11,7 +11,7 @@ job "fetch-secret" {
         args = ["-c", "cat ${NOMAD_SECRETS_DIR}/mysecret.json && sleep 3600"]
       }
       vault {}
- ## v1
+
       template {
         destination = "${NOMAD_SECRETS_DIR}/mysecret.json"
         data        = <<EOF

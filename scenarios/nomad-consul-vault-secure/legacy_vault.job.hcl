@@ -1,5 +1,5 @@
 job "fetch-secret" {
-  datacenters = ["murphy"]  # Update to match your your shikari cluster name
+  datacenters = ["*"] 
 
   group "example" {
     task "show-secret" {
@@ -14,7 +14,6 @@ job "fetch-secret" {
         policies = ["nomad-policy"]
       }
 
-## v1
       template {
         destination = "${NOMAD_SECRETS_DIR}/mysecret.json"
         data = <<EOF

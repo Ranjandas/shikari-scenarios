@@ -484,8 +484,6 @@ copyToHost:
     host: "{{.Dir}}/copied-from-guest/nomad-agent-ca.pem"
   - guest: "/etc/consul.d/certs/consul-agent-ca.pem"
     host: "{{.Dir}}/copied-from-guest/consul-agent-ca.pem"
-  - guest: "/etc/nomad.d/certs/nomad-agent-ca.pem"
-    host: "{{.Dir}}/copied-from-guest/nomad-agent-ca.pem"
 networks:
   - lima: shared
 vmType: qemu

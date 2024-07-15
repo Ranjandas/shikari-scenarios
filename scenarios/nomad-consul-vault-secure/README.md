@@ -1,19 +1,14 @@
-# Scenario: Nomad Consul Vault Quickstart
+# Scenario: Nomad Consul Vault Secure
 This scenario deploys Nomad, Consul and Vault with security configurations in place. This scenario is useful when you have to play around the features of Nomad and Vault (with or without Consul ) with the security aspects and runs workload Identity for Vault.
+It supports Vault Workload Identity and is enabled by default when the Nomad version is `>=1.8.0`. If you need to disable Workload Identity configuration with versions `>=1.8.0`, please pass `-e NOMAD_CONSUL_WI=false` with `shikari create`. The vault config uses raft as storage.
 
 ## Prerequisites
 The following tools are required to run these scenarios:
 
-- Shikari and Lima with Socket_VMNet configured
-- Requires a base VM image built using packer (../../packer/hashibox.pkr.hcl)
-- Uses qemu driver (you can use vz by modifying vmType in the template)
-- The vault config uses raft as storage.
 - Requires Packer build using Consul, Nomad and Vault binaries, may need to update the [variables.pkvars.hcl] file incase there's a need to change versions than default.
-- Update the vault.job.hcl to the correct shikari cluster name for datacenters block
-- This setup creates vault tokens for nomad jobs using workload Identity
-- It also supports Vault Workload Identity and is enabled by default when the Nomad version is `>=1.8.0`. If you need to disable Workload Identity configuration with versions `>=1.8.0`, please pass `-e NOMAD_CONSUL_WI=false` with `shikari create`.
 
 ## Usage
+
 
 ### Create
 
@@ -29,21 +24,6 @@ shikari create --name murphy \
                  --image ../../packer/.artifacts/<imagedir>/<image-file>.qcow2
                  --env NOMAD_VAULT_WI=true/false
 
-```
-
-### List
-
-List the VMs in the cluster
-
-```
-shikari list
-CLUSTER       VM NAME             SATUS         DISK(GB)       MEMORY(GB)       CPUS
-murphy        murphy-cli-01       Running       100            4                4
-murphy        murphy-cli-02       Running       100            4                4
-murphy        murphy-cli-03       Running       100            4                4
-murphy        murphy-srv-01       Running       100            4                4
-murphy        murphy-srv-02       Running       100            4                4
-murphy        murphy-srv-03       Running       100            4                4
 ```
 
 ### Access
