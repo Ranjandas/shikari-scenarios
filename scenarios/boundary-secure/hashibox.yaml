@@ -1,6 +1,15 @@
 plain: true
 
 provision:
+
+  - mode: system # Install Boundary License
+    script: |
+      #!/bin/bash
+
+      if [[ -n $BOUNDARY_LICENSE ]]; then
+        grep -q BOUNDARY_LICENSE /etc/boundary.d/boundaryenv || echo "BOUNDARY_LICENSE=$BOUNDARY_LICENSE" > /etc/boundary.d/boundary.env
+      fi
+      
   - mode: system # Start postgres db
     script: |
       #!/bin/bash
@@ -14,7 +23,7 @@ provision:
       export BOUNDARY_DATABASE=boundary
 
       systemctl enable --now docker
-      docker run --name boundary-postgres -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" -p 5432:5432 -d postgres:alpine
+      docker ps | grep -q boundary-postgres || docker run --name boundary-postgres -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" -p 5432:5432 -d postgres:alpine
 
       until pg_isready -h localhost -U ${POSTGRES_USERNAME}; do echo waiting; sleep 1; done
 
