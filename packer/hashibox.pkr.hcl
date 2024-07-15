@@ -31,6 +31,12 @@ variable "vault_version" {
   description = "Vault version to install"
 }
 
+variable "boundary_version" {
+  type        = string
+  default     = "0.16"
+  description = "Boundary version to install"
+}
+
 variable "consul_cni_version" {
   type        = string
   default     = "1.5.0"
@@ -58,8 +64,8 @@ locals {
   efi_firmware_code = "${var.arch == "aarch64" ? "/opt/homebrew/share/qemu/edk2-aarch64-code.fd" : ""}"
   efi_firmware_vars = "${var.arch == "aarch64" ? "/opt/homebrew/share/qemu/edk2-arm-vars.fd" : ""}"
 
-  source_image_url = "${var.arch == "aarch64" ? var.source_image_url : replace(var.source_image_url, "aarch64", "x86_64")}"
-  source_image_checksum = "${var.arch == "aarch64" ? var.source_image_checksum : replace(var.source_image_checksum, "aarch64", "x86_64")}" 
+  source_image_url      = "${var.arch == "aarch64" ? var.source_image_url : replace(var.source_image_url, "aarch64", "x86_64")}"
+  source_image_checksum = "${var.arch == "aarch64" ? var.source_image_checksum : replace(var.source_image_checksum, "aarch64", "x86_64")}"
 }
 
 source "qemu" "hashibox" {
@@ -77,7 +83,7 @@ source "qemu" "hashibox" {
   boot_command = []
   net_device   = "virtio-net"
 
-  output_directory = ".artifacts/c-${var.consul_version}-n-${var.nomad_version}-v-${var.vault_version}"
+  output_directory = ".artifacts/c-${var.consul_version}-n-${var.nomad_version}-v-${var.vault_version}-b-${var.boundary_version}"
 
   cpus   = 8
   memory = 5120
@@ -112,11 +118,12 @@ build {
       "CONSUL_VERSION=${var.consul_version}",
       "NOMAD_VERSION=${var.nomad_version}",
       "VAULT_VERSION=${var.vault_version}",
+      "BOUNDARY_VERSION=${var.boundary_version}",
       "CONSUL_CNI_VERSION=${var.consul_cni_version}"
     ]
     inline = [
       "sudo dnf clean all",
-      "sudo dnf install -y unzip wget",
+      "sudo dnf install -y unzip wget postgresql",
 
       # For multicast DNS to use with socket_vmnet in Lima we use systemd-resolved. For rocky we have to install epel repo for Crudini.
       "source /etc/os-release && [[ $ID != fedora ]] && sudo dnf install -y epel-release systemd-resolved && sudo systemctl enable --now systemd-resolved",
@@ -132,7 +139,7 @@ build {
 
       # Enable HashiCorp Repository and install the required packages including CNI libs
       "sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/$([ $(source /etc/os-release && echo $ID) == fedora ] && echo fedora || echo RHEL)/hashicorp.repo",
-      "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* vault-$VAULT_VERSION* containernetworking-plugins",
+      "sudo dnf install -y consul-$CONSUL_VERSION* nomad-$NOMAD_VERSION* vault-$VAULT_VERSION* boundary-$BOUNDARY_VERSION* containernetworking-plugins",
 
       # Nomad expects CNI binaries to be under /opt/cni/bin by default. We use symlink to avoid configuring alternate path in Nomad.
       "sudo mkdir /opt/cni && sudo ln -s /usr/libexec/cni /opt/cni/bin",
@@ -142,23 +149,20 @@ build {
       "sudo unzip /tmp/consul-cni.zip -d /usr/libexec/cni/",
 
       # Provision Nomad, Consul and Vault CA's that can be later used for agent cert provisioning.
-      "sudo mkdir /etc/consul.d/certs && cd /etc/consul.d/certs ; sudo consul tls ca create",
-      "sudo mkdir /etc/nomad.d/certs && cd /etc/nomad.d/certs ; sudo nomad tls ca create",
+      "sudo install -o consul -g consul -d /etc/consul.d/certs && cd /etc/consul.d/certs ; sudo consul tls ca create",
+      "sudo install -o nomad -g nomad -d /etc/nomad.d/certs && cd /etc/nomad.d/certs ; sudo nomad tls ca create",
       # this will generate CA with the name vault-agent-ca.pem. Ensure the cert generation commands out of these CA use `-domain vault`
-      "sudo mkdir /etc/vault.d/certs && cd /etc/vault.d/certs ; sudo consul tls ca create -domain vault",
+      "sudo install -o vault -g vault -d /etc/vault.d/certs && cd /etc/vault.d/certs ; sudo consul tls ca create -domain vault",
+      # this will generate CA with the name boundary-agent-ca.pem. Ensure the cert generation commands out of these CA use `-domain boundary`
+      "sudo install -o boundary -g boundary -d /etc/boundary.d/certs && cd /etc/boundary.d/certs ; sudo consul tls ca create -domain boundary",
 
       # Install exec2 driver and copy under /opt/nomad/data/plugins dir
       "sudo dnf install -y nomad-driver-exec2 --enablerepo hashicorp-test",
       "sudo mkdir /opt/nomad/data/plugins && sudo chown nomad:nomad /opt/nomad/data/plugins",
       "sudo cp /usr/bin/nomad-driver-exec2 /opt/nomad/data/plugins/",
 
-      # Set permissions for the certs directory
-      "sudo chown consul:consul /etc/consul.d/certs",
-      "sudo chown nomad:nomad /etc/nomad.d/certs",
-      "sudo chown vault:vault /etc/vault.d/certs",
-
       # Enabling of the services is the responsibility of the instance provisioning scripts.
-      "sudo systemctl disable docker consul nomad"
+      "sudo systemctl disable docker consul nomad vault boundary"
     ]
   }
 }
