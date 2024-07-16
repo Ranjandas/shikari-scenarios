@@ -97,9 +97,3 @@ nomad job status fetch-secret
 # Check logs to see if it returns the secrets from vault
 nomad alloc logs <alloc-id>
 ```
-
-### Destroy
-
-```
-$ shikari destroy -f -n murphy
-```
