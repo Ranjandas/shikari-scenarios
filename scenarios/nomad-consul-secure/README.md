@@ -1,6 +1,6 @@
 # Scenario: Nomad Consul Secure
 
-This scenario deploys both Nomad and Consul with ACLs and TLS in place. It is useful when you have to play around with Nomad's features (with or without Consul).
+This scenario deploys both Nomad and Consul configured with ACLs and TLS. It is useful when you have to run with reproduction env which leverages ACLs and TLS across Nomad and Consul.
 
 It also supports Consul Workload Identity and is enabled by default when the Nomad version is `>=1.8.0`. If you need to disable Workload Identity configuration with versions `>=1.8.0`, please pass `-e NOMAD_CONSUL_WI=false` with `shikari create`.
 
@@ -43,6 +43,17 @@ murphy        murphy-srv-02       Running       100            4                
 murphy        murphy-srv-03       Running       100            4                4
 ```
 
+#### Verify CA Certs(optional step)
+
+The Lima template for this specific scenario utilised configuration `copyToHost` in `hashibox.yaml`, which copies the Consul and Nomad CA Certs at location: `/Users/<user_name>/.lima/<vm_name>/copied-from-guest/`, so that user doesnt have to worry about dealing with CA cert configuration for CLI commands to interact with TLS enabled Consul and Nomad.
+
+```
+ls -l /Users/user.name/.lima/dc1-srv-01/copied-from-guest/
+total 16
+-rw-------  1 user.name  staff  1074 11 Jul 15:59 consul-agent-ca.pem
+-rw-------  1 user.name  staff  1115 11 Jul 15:59 nomad-agent-ca.pem
+```
+
 #### Access
 
 You can export the required environment variables to access both Nomad and Consul
@@ -50,6 +61,8 @@ You can export the required environment variables to access both Nomad and Consu
 ```
 $ eval $(shikari env -n murphy -tai consul)
 $ eval $(shikari env -n murphy -tai nomad)
+
+$ env|egrep 'CONSUL_HTTP_ADDR|NOMAD_ADDR'
 
 $ consul members
 Node                Address              Status  Type    Build   Protocol  DC      Partition  Segment
