@@ -43,26 +43,16 @@ murphy        murphy-srv-02       Running       100            4                
 murphy        murphy-srv-03       Running       100            4                4
 ```
 
-#### Verify CA Certs(optional step)
-
-The Lima template for this specific scenario utilised configuration `copyToHost` in `hashibox.yaml`, which copies the Consul and Nomad CA Certs at location: `/Users/<user_name>/.lima/<vm_name>/copied-from-guest/`, so that user doesnt have to worry about dealing with CA cert configuration for CLI commands to interact with TLS enabled Consul and Nomad.
-
-```
-ls -l /Users/user.name/.lima/dc1-srv-01/copied-from-guest/
-total 16
--rw-------  1 user.name  staff  1074 11 Jul 15:59 consul-agent-ca.pem
--rw-------  1 user.name  staff  1115 11 Jul 15:59 nomad-agent-ca.pem
-```
 
 #### Access
 
 You can export the required environment variables to access both Nomad and Consul
 
 ```
-$ eval $(shikari env -n murphy -tai consul)
-$ eval $(shikari env -n murphy -tai nomad)
+$ eval $(shikari env -n murphy -ta consul)
+$ eval $(shikari env -n murphy -ta nomad)
 
-$ env|egrep 'CONSUL_HTTP_ADDR|NOMAD_ADDR'
+$ env|egrep 'CONSUL|NOMAD'
 
 $ consul members
 Node                Address              Status  Type    Build   Protocol  DC      Partition  Segment
