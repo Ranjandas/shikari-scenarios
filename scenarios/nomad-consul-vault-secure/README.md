@@ -31,33 +31,11 @@ shikari create --name murphy \
 You can export the required environment variables to access both Nomad and Consul
 
 ```
-$ eval $(shikari env -n murphy consul)
+$ eval $(shikari env -n murphy -tai consul)
 
-$ consul members
-Node                Address              Status  Type    Build   Protocol  DC      Partition  Segment
-lima-murphy-srv-01  192.168.105.13:8301  alive   server  1.18.2  2         murphy  default    <all>
-lima-murphy-srv-02  192.168.105.12:8301  alive   server  1.18.2  2         murphy  default    <all>
-lima-murphy-srv-03  192.168.105.11:8301  alive   server  1.18.2  2         murphy  default    <all>
-lima-murphy-cli-01  192.168.105.10:8301  alive   client  1.18.2  2         murphy  default    <default>
-lima-murphy-cli-02  192.168.105.14:8301  alive   client  1.18.2  2         murphy  default    <default>
-lima-murphy-cli-03  192.168.105.9:8301   alive   client  1.18.2  2         murphy  default    <default>
+$ eval $(shikari env -n murphy -tai nomad)
 
-
-$ eval $(shikari env -n murphy nomad)
-
-$ nomad node status
-ID        Node Pool  DC      Name                Class   Drain  Eligibility  Status
-94665b9b  default    murphy  lima-murphy-cli-01  <none>  false  eligible     ready
-83c90834  default    murphy  lima-murphy-cli-03  <none>  false  eligible     ready
-65ecc0ed  default    murphy  lima-murphy-cli-02  <none>  false  eligible     ready
-
-$ nomad server members
-Name                       Address        Port  Status  Leader  Raft Version  Build  Datacenter  Region
-lima-murphy-srv-01.global  192.168.105.4  4648  alive   true    3             1.8.1  murphy      global
-lima-murphy-srv-02.global  192.168.105.5  4648  alive   false   3             1.8.1  murphy      global
-lima-murphy-srv-03.global  192.168.105.3  4648  alive   false   3             1.8.1  murphy      global
-
-$ eval $(shikari env -n murphy vault)
+$ eval $(shikari env -n murphy -tai vault)
 $ eval $(shikari exec -n murphy -i srv-01 env | grep VAULT_TOKEN)
 
 $ vault status
@@ -82,22 +60,35 @@ Raft Applied Index      65
 
 ```
 
-### Run a job to fetch secrets from vault
+### Run a job to fetch secrets from vault for WI
 
 ```
 # Put secrets into vault kv
 vault login $VAULT_TOKEN
 vault secrets enable -path=secret kv
-## This is for WI
 vault kv put secret/data/default/fetch-secret/config user=root password=secret
 vault kv get secret/data/default/fetch-secret/config
-## This is for legacy
-vault kv put secret/mysecret username="john" password="password123"
-vault kv get secret/mysecret
 
 # Run WI job to fetch those secrets 
 nomad run wi_vault.job.hcl
 nomad job status fetch-secret
+
+# Run legacy job to fetch those secrets 
+nomad run vault.job.hcl
+nomad job status fetch-secret
+
+# Check logs to see if it returns the secrets from vault
+nomad alloc logs <alloc-id>
+```
+
+### Run a job to fetch secrets from vault for Legacy
+
+```
+# Put secrets into vault kv
+vault login $VAULT_TOKEN
+vault secrets enable -path=secret kv
+vault kv put secret/mysecret username="john" password="password123"
+vault kv get secret/mysecret
 
 # Run legacy job to fetch those secrets 
 nomad run vault.job.hcl
