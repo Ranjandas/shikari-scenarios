@@ -74,7 +74,7 @@ nomad run wi_vault.job.hcl
 nomad job status fetch-secret
 
 # Run legacy job to fetch those secrets 
-nomad run vault.job.hcl
+nomad run wi_vault.job.hcl
 nomad job status fetch-secret
 
 # Check logs to see if it returns the secrets from vault
@@ -91,7 +91,7 @@ vault kv put secret/mysecret username="john" password="password123"
 vault kv get secret/mysecret
 
 # Run legacy job to fetch those secrets 
-nomad run vault.job.hcl
+nomad run legacy_vault.job.hcl
 nomad job status fetch-secret
 
 # Check logs to see if it returns the secrets from vault
