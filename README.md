@@ -69,6 +69,8 @@ The following steps will build a VM image with Consul and Nomad installed, which
     $ packer init hashibox.pkr.hcl
     $ packer build -var-file variables.pkrvars.hcl hashibox.pkr.hcl
     ```
+    > NOTE: Pass `-var enterprise=true` for Enterprise binaries and `-var fips=true` for fips binaries repsectively.
+    
     This will build the VM image into the `.artifacts` directory in the current directory.
 
 2. Now you can run the scenarios by going into specific scenario directory and invoking the template using Shikari.
