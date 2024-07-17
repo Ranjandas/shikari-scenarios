@@ -1,17 +1,3 @@
-# Deploy kubernetes via k3s (which installs a bundled containerd).
-# $ limactl start ./k3s.yaml
-# $ limactl shell k3s kubectl
-#
-# It can be accessed from the host by exporting the kubeconfig file;
-# the ports are already forwarded automatically by lima:
-#
-# $ export KUBECONFIG=$(limactl list k3s --format 'unix://{{.Dir}}/copied-from-guest/kubeconfig.yaml')
-# $ kubectl get no
-# NAME       STATUS   ROLES                  AGE   VERSION
-# lima-k3s   Ready    control-plane,master   69s   v1.21.1+k3s1
-#
-# This template requires Lima v0.7.0 or later.
-
 images:
 # Try to use release-yyyyMMdd image if available. Note that release-yyyyMMdd will be removed after several months.
 - location: "https://cloud-images.ubuntu.com/releases/24.04/release-20240423/ubuntu-24.04-server-cloudimg-amd64.img"
@@ -33,6 +19,15 @@ provision:
 - mode: system # Setup systemd-resolved for name resolution using mDNS
   script: |
     #!/bin/sh
+
+    . /etc/os-release
+
+    # This provisioning script is only required for the upstream Ubuntu Images.
+    # If you launch this scenario with pre-baked images (that are Fedora based), this will be skipped
+    # as all of the configurations here are baked into the image.
+    if [ $ID != ubuntu ]; then
+      exit 0
+    fi
 
     sed -i 's/^#MulticastDNS.*/MulticastDNS=yes/g' /etc/systemd/resolved.conf
     systemctl restart systemd-resolved
