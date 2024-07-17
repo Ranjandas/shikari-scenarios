@@ -13,15 +13,27 @@ variable "arch" {
   description = "Architecture of the machine where you'd run the image"
 }
 
+variable "enterprise" {
+  type        = bool
+  default     = false
+  description = "Switch between Enterprise and CE binaries for installation"
+}
+
+variable "fips" {
+  type        = bool
+  default     = false
+  description = "Switch between FIPS and non-FIPS binaries for installation"
+}
+
 variable "consul_version" {
   type        = string
-  default     = "1.18"
+  default     = "1.19"
   description = "Consul version to install"
 }
 
 variable "nomad_version" {
   type        = string
-  default     = "1.7"
+  default     = "1.8"
   description = "Nomad version to install"
 }
 
@@ -68,6 +80,26 @@ locals {
   source_image_checksum = "${var.arch == "aarch64" ? var.source_image_checksum : replace(var.source_image_checksum, "aarch64", "x86_64")}"
 }
 
+locals {
+  # fips will always be enterprise. We are using '*' here as the Vault FIPS package name is vault-enterprise-fips1402
+  is_fips = "${var.fips ? "enterprise-fips*" : "enterprise"}"
+
+  is_ent = "${var.enterprise || var.fips ? true : false}"
+
+
+  # switch between Enterprise and CE 
+  nomad_version    = "${local.is_ent ? join("-", ["enterprise", var.nomad_version]) : var.nomad_version}"
+  boundary_version = "${local.is_ent ? join("-", ["enterprise", var.boundary_version]) : var.boundary_version}"
+
+  # only Consul and Nomad has FIPS
+  consul_version = "${local.is_ent ? join("-", [local.is_fips, var.consul_version]) : var.consul_version}"
+  vault_version  = "${local.is_ent ? join("-", [local.is_fips, var.vault_version]) : var.vault_version}"
+
+  # used to name the VM image
+  image_id_format = "c-${var.consul_version}-n-${var.nomad_version}-v-${var.vault_version}-b-${var.boundary_version}"
+  image_id_string = "${local.is_ent ? join("-", [replace(local.is_fips, "*", ""), local.image_id_format]) : local.image_id_format}"
+}
+
 source "qemu" "hashibox" {
   iso_url      = "${local.source_image_url}"
   iso_checksum = "${local.source_image_checksum}"
@@ -79,11 +111,11 @@ source "qemu" "hashibox" {
   disk_image       = true
 
   format       = "qcow2"
-  vm_name      = "c-${var.consul_version}-n-${var.nomad_version}-v-${var.vault_version}.qcow2"
+  vm_name      = "hashibox.qcow2"
   boot_command = []
   net_device   = "virtio-net"
 
-  output_directory = ".artifacts/c-${var.consul_version}-n-${var.nomad_version}-v-${var.vault_version}-b-${var.boundary_version}"
+  output_directory = pathexpand(join("/", ["~/.shikari", local.image_id_string]))
 
   cpus   = 8
   memory = 5120
@@ -115,10 +147,10 @@ build {
 
   provisioner "shell" {
     environment_vars = [
-      "CONSUL_VERSION=${var.consul_version}",
-      "NOMAD_VERSION=${var.nomad_version}",
-      "VAULT_VERSION=${var.vault_version}",
-      "BOUNDARY_VERSION=${var.boundary_version}",
+      "CONSUL_VERSION=${local.consul_version}",
+      "NOMAD_VERSION=${local.nomad_version}",
+      "VAULT_VERSION=${local.vault_version}",
+      "BOUNDARY_VERSION=${local.boundary_version}",
       "CONSUL_CNI_VERSION=${var.consul_cni_version}"
     ]
     inline = [
