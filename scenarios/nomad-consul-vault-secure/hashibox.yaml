@@ -175,7 +175,7 @@ provision:
       NOMAD_VAULT_TOKEN=$(vault token create -role=nomad-role -format=json | jq -r '.auth.client_token')
 
       # # Step 2: Export the token as an environment variable
-      # export NOMAD_VAULT_TOKEN
+      export NOMAD_VAULT_TOKEN
 
       # Step 3: Append the NOMAD_VAULT_TOKEN to the /etc/profile.d/vault.sh file
       echo 'export NOMAD_VAULT_TOKEN='"${NOMAD_VAULT_TOKEN}" | sudo tee -a /etc/profile.d/vault.sh
