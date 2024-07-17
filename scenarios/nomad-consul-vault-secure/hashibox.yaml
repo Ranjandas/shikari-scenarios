@@ -47,8 +47,8 @@ provision:
         exit 0
       fi
 
-      # export VAULT_ADDR=https://127.0.0.1:8200
-      # export VAULT_CACERT=/etc/vault.d/certs/consul-agent-ca.pem
+      export VAULT_ADDR=https://127.0.0.1:8200
+      export VAULT_CACERT=/etc/vault.d/certs/consul-agent-ca.pem
 
       HOSTNAME=$(hostname -s)
 
@@ -109,6 +109,7 @@ provision:
   
       export VAULT_ADDR=https://127.0.0.1:8200
       export VAULT_CACERT=/etc/vault.d/certs/vault-agent-ca.pem
+      HOSTNAME=$(hostname -s)
       
       if [[ "$HOSTNAME" == *"srv-01"* ]]; then
         
@@ -160,6 +161,7 @@ provision:
      #!/bin/bash
      export VAULT_ADDR=https://127.0.0.1:8200
      export VAULT_CACERT=/etc/vault.d/certs/vault-agent-ca.pem
+     HOSTNAME=$(hostname -s)
  
      # Set hostname to create nomad policy and roles
      if [[ "${NOMAD_VAULT_WI,,}" != true ]] && [[ ${HOSTNAME} == "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
