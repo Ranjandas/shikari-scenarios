@@ -42,13 +42,18 @@ provision:
     script: |
       #!/bin/bash
 
-      export VAULT_ADDR=https://127.0.0.1:8200
-      export VAULT_CACERT=/etc/vault.d/certs/consul-agent-ca.pem
+      # avoid running the script on restarts
+      if [[ -f /shikari-bootstrapped ]] then
+        exit 0
+      fi
+
+      # export VAULT_ADDR=https://127.0.0.1:8200
+      # export VAULT_CACERT=/etc/vault.d/certs/consul-agent-ca.pem
+
+      HOSTNAME=$(hostname -s)
 
       # Set the hostname to unseal vault
       if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
-
-      HOSTNAME=$(hostname -s)
 
       cat <<-EOF > /etc/vault.d/vault.hcl
         api_addr     = "https://${HOSTNAME}.local:8200"
@@ -85,6 +90,9 @@ provision:
       EOF
       fi
 
+      # Use nomad to format the config file if it exists
+      command -v nomad &>/dev/null && nomad fmt /etc/vault.d/vault.hcl
+
   - mode: system  # start and enable Vault
     script: |
       systemctl enable --now vault
@@ -92,6 +100,12 @@ provision:
   - mode: system  # init and unseal Vault
     script: |
       #!/bin/bash
+
+      # avoid running the script on restarts
+
+      if [[ -f /shikari-bootstrapped ]] then
+        exit 0
+      fi
   
       export VAULT_ADDR=https://127.0.0.1:8200
       export VAULT_CACERT=/etc/vault.d/certs/vault-agent-ca.pem
@@ -122,15 +136,24 @@ provision:
         vault login ${VAULT_TOKEN}
 
         # execute the following in a subshell to not overwrite VAULT_ADDR
-
+        (
+          if [[ $SHIKARI_SERVER_COUNT > 1 ]]; then
             for x in `seq 2 $SHIKARI_SERVER_COUNT`; do
+
+              VAULT_ADDR="https://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200"
+
               until [ "$(curl -s --cacert $VAULT_CACERT $VAULT_ADDR/v1/sys/health | jq -r '.initialized')" = "true" ]; do
                 echo "Waiting for Vault"
                 sleep 2
               done
-              VAULT_ADDR="https://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200" vault operator unseal $VAULT_UNSEAL_KEY
+
+              vault operator unseal $VAULT_UNSEAL_KEY
             done
-        fi
+          fi
+        )
+      fi
+
+      touch /shikari-bootstrapped
 
   - mode: system # Configure nomad policy and role for vault token method
     script: |
@@ -188,7 +211,7 @@ provision:
       vault {
         enabled = true
         address = \"https://127.0.0.1:8200\"
-        ca_file = \"/etc/vault.d/certs/vault-agent-ca.pem\"
+        ca_file = \"/opt/vault/tls/consul-agent-ca.pem\"
 
         default_identity {
           aud = [\"vault.io\"]
@@ -346,14 +369,10 @@ provision:
   - mode: system # Configure Nomad common settings
     script: |
       #!/bin/bash
-
-      # allow the DC name to be overriden by NOMAD_DC environment variable
-      NOMAD_DC_NAME="${NOMAD_DC:-$SHIKARI_CLUSTER_NAME}"
-
       cat <<-EOF > /etc/nomad.d/nomad.hcl
         data_dir  = "/opt/nomad/data"
         bind_addr = "0.0.0.0"
-        datacenter = "${NOMAD_DC_NAME}"
+        datacenter = "${SHIKARI_CLUSTER_NAME}"
         log_level = "DEBUG"
 
         advertise {
