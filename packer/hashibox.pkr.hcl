@@ -188,7 +188,7 @@ build {
       # this will generate CA with the name boundary-agent-ca.pem. Ensure the cert generation commands out of these CA use `-domain boundary`
       "sudo install -o boundary -g boundary -d /etc/boundary.d/certs && cd /etc/boundary.d/certs ; sudo consul tls ca create -domain boundary",
 
-      # Install exec2 driver and copy under /opt/nomad/data/plugins dir
+      # Install exec2 driver
       "sudo dnf install -y nomad-driver-exec2 --enablerepo hashicorp-test",
 
       # Enabling of the services is the responsibility of the instance provisioning scripts.
