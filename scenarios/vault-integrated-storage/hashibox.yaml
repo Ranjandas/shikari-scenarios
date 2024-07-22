@@ -48,8 +48,6 @@ provision:
         echo retry_join {
         echo leader_api_addr      = \"https://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200\"
         echo leader_ca_cert_file  = \"/etc/vault.d/certs/vault-agent-ca.pem\"
-        echo leader_client_cert_  = \"/etc/vault.d/certs/dc1-server-vault-0.pem\"
-        echo leader_client_kile   = \"/etc/vault.d/certs/dc1-server-vault-0-key.pem\"
         echo }
        done)
       }
