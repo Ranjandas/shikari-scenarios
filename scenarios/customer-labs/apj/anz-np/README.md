@@ -11,7 +11,6 @@ This is lab for ANZ Bank Non prod environment involving Consul servers as KV bac
 The following steps will build a Vault cluster with consul servers as storage backend.
 
 ```
-- Change directory to ANZ scenario.
 - shikari create -n <cluster_name> <scenario-hashibox.yaml> -s 3 -c3 -e VAULT_LICENSE=$(cat <vault_license_file>) -e CONSUL_LICENSE=$(cat <vault_license_file>) -i <image>
 ```
 
