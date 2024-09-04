@@ -1,7 +1,7 @@
 # Customer Scenario
-## Customer: ANZ
-## Environment: NonProd
-## Use Case: Vault Consul Storage
+- Customer: ANZ
+- Environment: NonProd
+- Use Case: Vault Consul Storage
 
 ## Description:
 This is lab for ANZ Bank Non prod environment involving Consul servers as KV backend for Vault servers. Consul clients are installed within Vault servers
@@ -33,7 +33,7 @@ eval "export $(shikari exec -n <cluster_name> -i srv-01 env | grep TOKEN)"
 - lima-dc1-srv-xx : Consul servers
 - lima-dc1-cli-xx : Vault Servers with Consul clients
 
-- snippet of example cluster:
+- snippet of example cluster below, where -dc1-srv-xx are consul backend servers, and dc1-cli-xx are Vault servers, also running Consul client agents:
 
 ```
 [lima@lima-dc1-cli-03 ~]$ consul members -token root
