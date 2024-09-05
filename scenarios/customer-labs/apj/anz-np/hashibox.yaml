@@ -134,11 +134,27 @@ provision:
       done
 
       if echo $HOSTNAME | grep srv-01$ > /dev/null 2>&1; then
-        vault_policy='agent_prefix "" { policy = "read" } key_prefix "vault/" { policy = "write" } service "vault" { policy = "write" } session_prefix "" { policy = "write" }'
+        vault_policy='agent_prefix "" { policy = "read" } key_prefix "vault/" { policy = "write" } service "vault" { policy = "write" } session_prefix "" { policy = "write" } node_prefix "" { policy = "read" }'
 
         echo $vault_policy | consul acl policy create -name vault-policy -rules=-
         consul acl token create -secret=11111111-1111-1111-1111-111111111111 --policy-name vault-policy
       fi
+
+  - mode: system # Create node-identity agent tokens for consul
+    script: |
+      #!/usr/bin/env bash
+
+      # avoid running the script on restarts
+
+      if [[ -f /shikari-bootstrapped ]] then
+        exit 0
+      fi
+
+      export CONSUL_HTTP_TOKEN=root
+      agent_token=$(consul acl token create -node-identity $(hostname):${SHIKARI_CLUSTER_NAME} -format json | jq -r '.SecretID')
+      consul acl set-agent-token agent $agent_token
+      
+       
 
 
   # \   \ /   /  _  \ |    |   \    | \__    ___/ #
@@ -217,10 +233,6 @@ provision:
 
       fi
 
-#  - mode: system  # start and enable Vault
-#    script: |
-#      systemctl enable --now vault
-      
 
   - mode: system  # init and unseal Vault
     script: |
@@ -242,16 +254,16 @@ provision:
         until curl -s --cacert /etc/vault.d/certs/vault-agent-ca.pem $VAULT_ADDR/v1/sys/health; do
           echo "Waiting for Vault"
         done
+        
+        if [[ `hostname -s` == *"cli-01" ]]; then
+          vault operator init -key-shares=1 -key-threshold=1 -format=json > ~/VaultCreds.json
+          sudo mv ~/VaultCreds.json /etc/vault.d/VaultCreds.json
+          sudo chown root:vault /etc/vault.d/VaultCreds.json
+          sudo chmod 0640 /etc/vault.d/VaultCreds.json
+          VAULT_UNSEAL_KEY=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .unseal_keys_b64[0])
+          VAULT_TOKEN=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .root_token)
+        fi
 
-        vault operator init -key-shares=1 -key-threshold=1 -format=json > ~/VaultCreds.json
-        
-        sudo mv ~/VaultCreds.json /etc/vault.d/VaultCreds.json
-        sudo chown root:vault /etc/vault.d/VaultCreds.json
-        sudo chmod 0640 /etc/vault.d/VaultCreds.json
-        
-        VAULT_UNSEAL_KEY=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .unseal_keys_b64[0])
-        VAULT_TOKEN=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .root_token)
-        
         echo export VAULT_ADDR="https://127.0.0.1:8200" | sudo tee -a /etc/profile.d/vault.sh
         echo export VAULT_CACERT=$VAULT_CACERT | sudo tee -a /etc/profile.d/vault.sh
         echo export VAULT_UNSEAL_KEY=$VAULT_UNSEAL_KEY | sudo tee -a /etc/profile.d/vault.sh 
