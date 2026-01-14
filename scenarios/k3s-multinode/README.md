@@ -2,7 +2,7 @@
 
 This scenario builds Kubernetes Cluster (using K3S). This scenario supports K3S HA. 
 
-Specificy the size of the cluster by setting number of servers using the `--servers/-s` and `--clients/-c` flags.
+Specify the size of the cluster by setting number of servers using the `--servers/-s` and `--clients/-c` flags.
 
 When `-s` is > 1, HA will be configured. All the control-plane nodes gets the NoSchedule Taint, so to run workloads you would need atleast one client or use tolerations.
 
@@ -19,6 +19,10 @@ The following steps will build a Multinode Kubernetes cluster with 3 Control Pla
 shikari create -n k3s -s 3 -c 1 -i ~/.shikari/c-1.19-n-1.8-v-1.17-b-0.16/hashibox.qcow2
 ```
 > NOTE: You can skip the `-i` flag in the above command to use the upstream Ubuntu Images
+
+### Launch Variables
+
+* Use `PSA_DEFAULT_PROFILE` to set the PodSecurityAdmission Controllers default profile. By default it is set to `privileged`
 
 ### Access
 
