@@ -68,11 +68,11 @@ provision:
     # This is required for all the servers to join the first seed server.
     K3S_URL_ARG="--server https://lima-${SHIKARI_CLUSTER_NAME}-srv-01.local:6443"
    
-    if [ $(hostname -s) = "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]; then
+    if [ "$(hostname -s)" = "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]; then
       # Set this to empty on the first server
       K3S_URL_ARG=""
 
-      if [ "${SHIKARI_SERVER_COUNT}" > 1 ]; then
+      if [ "${SHIKARI_SERVER_COUNT}" -gt 1 ]; then
         K3S_CLUSTER_INIT_ARG="--cluster-init"
       fi
     fi
@@ -86,8 +86,49 @@ provision:
     # ref: https://developer.hashicorp.com/packer/docs/templates/hcl_templates/functions/uuid/uuidv5
     K3S_TOKEN=$(uuidgen --namespace @oid --name k3s --sha1)
 
+
+    # Ref: https://docs.k3s.io/security/hardening-guide#pod-security
+
+    PSA_DEFAULT_PROFILE=${PSA_DEFAULT_PROFILE:-privileged}
+
+    PSA_CONFIG="
+    apiVersion: apiserver.config.k8s.io/v1
+    kind: AdmissionConfiguration
+    plugins:
+    - name: PodSecurity
+      configuration:
+        apiVersion: pod-security.admission.config.k8s.io/v1beta1
+        kind: PodSecurityConfiguration
+        defaults:
+          enforce: "${PSA_DEFAULT_PROFILE}"
+          enforce-version: "latest"
+          audit: "${PSA_DEFAULT_PROFILE}"
+          audit-version: "latest"
+          warn: "${PSA_DEFAULT_PROFILE}"
+          warn-version: "latest"
+        exemptions:
+          usernames: []
+          runtimeClasses: []
+          namespaces: [kube-system, cis-operator-system]
+    "
+
     if [ ! -d /var/lib/rancher/k3s ]; then
-      curl -sfL https://get.k3s.io | K3S_TOKEN=${K3S_TOKEN} INSTALL_K3S_EXEC="${K3S_MODE} --node-taint=${K3S_NODE_TAINT} --flannel-iface=lima0 --node-ip ${LIMA_IP} ${K3S_URL_ARG} ${K3S_CLUSTER_INIT_ARG} ${K3S_KUBECONFIG_MODE_ARG}" sh -
+
+      if [ ${K3S_MODE} = "server" ]; then
+
+        PSA_CONFIG_PATH=/var/lib/rancher/k3s/server/psa.yaml
+        KUBE_APISERVER_ARG="--tls-san "${HOSTNAME}.local" --disable=traefik --kube-apiserver-arg admission-control-config-file=${PSA_CONFIG_PATH}"
+
+        mkdir -p /var/lib/rancher/k3s/server
+        printf "%s" "${PSA_CONFIG}" > ${PSA_CONFIG_PATH}
+      fi
+
+      if ! [ -z $K3S_NODE_TAINT ]; then
+        # empty taint arg would stop K3S from starting from a recent version
+        K3S_NODE_TAINT_ARG="--node-taint=${K3S_NODE_TAINT}"
+      fi
+
+      curl -sfL https://get.k3s.io | K3S_TOKEN=${K3S_TOKEN} INSTALL_K3S_EXEC="${K3S_MODE} ${K3S_NODE_TAINT_ARG} --flannel-iface=lima0 --node-ip ${LIMA_IP} ${K3S_URL_ARG} ${K3S_CLUSTER_INIT_ARG} ${K3S_KUBECONFIG_MODE_ARG} ${KUBE_APISERVER_ARG}" sh -
     fi
 
     # Set the cluster server URL to the lima0 interface IP so that it can be copied to host and access the cluster.
@@ -95,5 +136,7 @@ provision:
 
 networks:
   - lima: shared
+vmType: qemu
 env:
   SHIKARI_SCENARIO_NAME: "k3s-multinode"
+
